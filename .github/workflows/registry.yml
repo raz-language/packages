@@ -1,0 +1,37 @@
+name: Registry
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reject changes to published package versions
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          changed="$(git diff --name-status "origin/${{ github.base_ref }}...HEAD" -- 'packages/**/*.dpk')"
+          if [ -n "$changed" ]; then
+            echo "$changed"
+            if echo "$changed" | awk '$1 != "A" { bad=1 } END { exit bad ? 0 : 1 }'; then
+              echo "Published package versions are immutable; only new .dpk paths may be added." >&2
+              exit 1
+            fi
+          fi
+      - name: Verify generated index
+        run: python scripts/generate_index.py --check
+      - name: Validate registry
+        run: python scripts/validate_registry.py

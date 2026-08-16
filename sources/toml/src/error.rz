@@ -1,0 +1,38 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace toml::error;
+
+public enum TomlErrorKind {
+    None,
+    UnexpectedEnd,
+    InvalidKey,
+    MissingEquals,
+    MissingValue,
+    InvalidValue,
+    UnterminatedString,
+    UnterminatedArray,
+    UnterminatedInlineTable,
+    InvalidTable,
+    DepthExceeded,
+    OutOfMemory,
+}
+
+/// Parse error with one-based source location.
+public struct TomlError {
+    TomlErrorKind kind;
+    i64 line;
+    i64 column;
+}
+
+public fn ok() -> TomlError {
+    return TomlError {
+        kind: TomlErrorKind::None,
+        line: 0,
+        column: 0,
+    };
+}
+
+public fn success(TomlError& error) -> bool {
+    return error.kind == TomlErrorKind::None;
+}

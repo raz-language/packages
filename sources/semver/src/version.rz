@@ -1,0 +1,389 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace semver::version;
+/// A strict SemVer 2.0.0 version view. Prerelease and build metadata remain
+/// borrowed slices of the input bytes, so parsing itself performs no allocation.
+public struct Version {
+    u64 major;
+    u64 minor;
+    u64 patch;
+    usize prerelease;
+    i64 prerelease_length;
+    usize build;
+    i64 build_length;
+}
+
+fn byte_at(usize data, i64 index) -> u8 {
+    unsafe {
+        return *((data + index)as u8*const);
+    }
+}
+
+fn is_digit(u8 byte) -> bool {
+    return byte >= 48 && byte <= 57;
+}
+
+fn is_alpha(u8 byte) -> bool {
+    return (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
+}
+
+fn is_identifier_byte(u8 byte) -> bool {
+    return is_digit(byte) || is_alpha(byte) || byte == 45;
+}
+
+fn parse_u64(usize data, i64 start, i64 end, u64&mut output) -> bool {
+    if (start >= end) {
+        return false;
+    }
+    if (end - start > 1 && byte_at(data, start) == 48) {
+        return false;
+    }
+
+    u64 value = 0;
+    i64 index = start;
+
+    while (index < end) {
+        u8 byte = byte_at(data, index);
+
+        if (!is_digit(byte)) {
+            return false;
+        }
+
+        u64 digit = (byte - 48)as u64;
+
+        if (value > 1844674407370955161 || (value == 1844674407370955161 && digit > 5)) {
+            return false;
+        }
+        value = value * 10 + digit;
+        index += 1;
+    }
+    *output = value;
+    return true;
+}
+
+fn validate_identifiers(usize data, i64 start, i64 end, bool prerelease) -> bool {
+    if (start >= end) {
+        return false;
+    }
+
+    i64 identifier_start = start;
+    i64 index = start;
+
+    while (index <= end) {
+        bool boundary = index == end;
+
+        if (!boundary && byte_at(data, index) == 46) {
+            boundary = true;
+        }
+        if (boundary) {
+            if (identifier_start == index) {
+                return false;
+            }
+
+            bool numeric = true;
+            i64 scan = identifier_start;
+
+            while (scan < index) {
+                u8 byte = byte_at(data, scan);
+
+                if (!is_identifier_byte(byte)) {
+                    return false;
+                }
+                if (!is_digit(byte)) {
+                    numeric = false;
+                }
+                scan += 1;
+            }
+            if (
+                prerelease &&
+                numeric &&
+                index - identifier_start > 1 &&
+                byte_at(data, identifier_start) == 48
+            ) {
+                return false;
+            }
+            identifier_start = index + 1;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+public fn empty() -> Version {
+    return Version {
+        major: 0,
+        minor: 0,
+        patch: 0,
+        prerelease: 0,
+        prerelease_length: 0,
+        build: 0,
+        build_length: 0,
+    };
+}
+
+/// Parse an exact SemVer 2.0.0 version. A leading `v`, missing components,
+/// whitespace, and numeric identifiers with leading zeros are rejected.
+public fn parse(usize data, i64 length, Version&mut output) -> bool {
+    if (data == 0 || length < 5) {
+        return false;
+    }
+
+    i64 first_dot = -1;
+    i64 second_dot = -1;
+    i64 suffix = length;
+    i64 index = 0;
+
+    while (index < length) {
+        u8 byte = byte_at(data, index);
+
+        if (byte == 46) {
+            if (first_dot < 0) {
+                first_dot = index;
+            } else if (second_dot < 0) {
+                second_dot = index;
+            }
+        } else if (byte == 45 || byte == 43) {
+            suffix = index;
+            break;
+        }
+        index += 1;
+    }
+    if (first_dot <= 0 || second_dot <= first_dot + 1 || second_dot >= suffix - 1) {
+        return false;
+    }
+
+    u64 major = 0;
+    u64 minor = 0;
+    u64 patch = 0;
+
+    if (!parse_u64(data, 0, first_dot, &mut major)) {
+        return false;
+    }
+    if (!parse_u64(data, first_dot + 1, second_dot, &mut minor)) {
+        return false;
+    }
+    if (!parse_u64(data, second_dot + 1, suffix, &mut patch)) {
+        return false;
+    }
+
+    usize prerelease = 0;
+    i64 prerelease_length = 0;
+    usize build = 0;
+    i64 build_length = 0;
+
+    index = suffix;
+    if (index < length && byte_at(data, index) == 45) {
+        i64 pre_start = index + 1;
+        i64 pre_end = pre_start;
+
+        while (pre_end < length && byte_at(data, pre_end) != 43) {
+            pre_end += 1;
+        }
+        if (!validate_identifiers(data, pre_start, pre_end, true)) {
+            return false;
+        }
+        prerelease = data + pre_start;
+        prerelease_length = pre_end - pre_start;
+        index = pre_end;
+    }
+    if (index < length && byte_at(data, index) == 43) {
+        i64 build_start = index + 1;
+
+        if (!validate_identifiers(data, build_start, length, false)) {
+            return false;
+        }
+        build = data + build_start;
+        build_length = length - build_start;
+        index = length;
+    }
+    if (index != length) {
+        return false;
+    }
+    output.major = major;
+    output.minor = minor;
+    output.patch = patch;
+    output.prerelease = prerelease;
+    output.prerelease_length = prerelease_length;
+    output.build = build;
+    output.build_length = build_length;
+    return true;
+}
+
+fn compare_numeric_identifier(usize left, i64 left_length, usize right, i64 right_length) -> i64 {
+    if (left_length < right_length) {
+        return -1;
+    }
+    if (left_length > right_length) {
+        return 1;
+    }
+
+    i64 index = 0;
+
+    while (index < left_length) {
+        u8 a = byte_at(left, index);
+        u8 b = byte_at(right, index);
+
+        if (a < b) {
+            return -1;
+        }
+        if (a > b) {
+            return 1;
+        }
+        index += 1;
+    }
+    return 0;
+}
+
+fn identifier_is_numeric(usize data, i64 length) -> bool {
+    i64 index = 0;
+
+    while (index < length) {
+        if (!is_digit(byte_at(data, index))) {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn compare_identifier(usize left, i64 left_length, usize right, i64 right_length) -> i64 {
+    bool left_numeric = identifier_is_numeric(left, left_length);
+    bool right_numeric = identifier_is_numeric(right, right_length);
+
+    if (left_numeric && !right_numeric) {
+        return -1;
+    }
+    if (!left_numeric && right_numeric) {
+        return 1;
+    }
+    if (left_numeric) {
+        return compare_numeric_identifier(left, left_length, right, right_length);
+    }
+
+    i64 common = left_length;
+
+    if (right_length < common) {
+        common = right_length;
+    }
+
+    i64 index = 0;
+
+    while (index < common) {
+        u8 a = byte_at(left, index);
+        u8 b = byte_at(right, index);
+
+        if (a < b) {
+            return -1;
+        }
+        if (a > b) {
+            return 1;
+        }
+        index += 1;
+    }
+    if (left_length < right_length) {
+        return -1;
+    }
+    if (left_length > right_length) {
+        return 1;
+    }
+    return 0;
+}
+
+fn next_identifier(usize data, i64 length, i64&mut offset, usize&mut out_data, i64&mut out_length) -> bool {
+    i64 current = *offset;
+
+    if (current >= length) {
+        return false;
+    }
+
+    i64 start = current;
+
+    while (current < length && byte_at(data, current) != 46) {
+        current += 1;
+    }
+    *out_data = data + start;
+    *out_length = current - start;
+    if (current < length && byte_at(data, current) == 46) {
+        current += 1;
+    }
+    *offset = current;
+    return true;
+}
+
+/// SemVer precedence comparison. Build metadata is intentionally ignored.
+public fn compare(Version& left, Version& right) -> i64 {
+    if (left.major < right.major) {
+        return -1;
+    }
+    if (left.major > right.major) {
+        return 1;
+    }
+    if (left.minor < right.minor) {
+        return -1;
+    }
+    if (left.minor > right.minor) {
+        return 1;
+    }
+    if (left.patch < right.patch) {
+        return -1;
+    }
+    if (left.patch > right.patch) {
+        return 1;
+    }
+    if (left.prerelease_length == 0 && right.prerelease_length == 0) {
+        return 0;
+    }
+    if (left.prerelease_length == 0) {
+        return 1;
+    }
+    if (right.prerelease_length == 0) {
+        return -1;
+    }
+
+    i64 left_offset = 0;
+    i64 right_offset = 0;
+
+    while (left_offset < left.prerelease_length && right_offset < right.prerelease_length) {
+        usize left_data = 0;
+        usize right_data = 0;
+        i64 left_length = 0;
+        i64 right_length = 0;
+
+        next_identifier(
+            left.prerelease,
+            left.prerelease_length,
+            &mut left_offset,
+            &mut left_data,
+            &mut left_length,
+        );
+        next_identifier(
+            right.prerelease,
+            right.prerelease_length,
+            &mut right_offset,
+            &mut right_data,
+            &mut right_length,
+        );
+
+        i64 result = compare_identifier(left_data, left_length, right_data, right_length);
+
+        if (result != 0) {
+            return result;
+        }
+    }
+    if (left_offset < left.prerelease_length) {
+        return 1;
+    }
+    if (right_offset < right.prerelease_length) {
+        return -1;
+    }
+    return 0;
+}
+
+public fn equal(Version& left, Version& right) -> bool {
+    return compare(left, right) == 0;
+}
+
+public fn is_prerelease(Version& version) -> bool {
+    return version.prerelease_length != 0;
+}

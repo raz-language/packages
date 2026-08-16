@@ -1,0 +1,15 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import datetime::types;
+import datetime::timestamp;
+import datetime::rfc3339;
+
+fn main() -> i64 {
+    Timestamp current = datetime::timestamp::now();
+    UtcOffset utc = datetime::types::utc();
+    OffsetDateTime value = datetime::rfc3339::from_timestamp(&current, &utc);
+    u8 buffer[40];
+    i64 written = datetime::rfc3339::format(&value, &buffer[0]as usize, 40);
+    return written < 0 ? 1 : 0;
+}

@@ -1,0 +1,72 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace serde::de;
+import alloc::string;
+public import serde::error;
+
+public enum ValueKind {
+    Null,
+    Bool,
+    Signed,
+    Unsigned,
+    Float,
+    Bytes,
+    String,
+    Sequence,
+    Map,
+    End,
+}
+
+// Deserializers expose borrowed byte/string views. This keeps formats free to
+// decode without allocating; Deserialize implementations decide when ownership
+// is required.
+public trait Deserializer {
+    fn kind(Self& self) -> ValueKind;
+    fn read_null(Self&mut self) -> SerdeError;
+    fn read_bool(Self&mut self, bool&mut output) -> SerdeError;
+    fn read_i64(Self&mut self, i64&mut output) -> SerdeError;
+    fn read_u64(Self&mut self, u64&mut output) -> SerdeError;
+    fn read_f64(Self&mut self, f64&mut output) -> SerdeError;
+    fn read_bytes(Self&mut self, usize&mut data, i64&mut length) -> SerdeError;
+    fn read_string(Self&mut self, usize&mut data, i64&mut length) -> SerdeError;
+    fn begin_sequence(Self&mut self, i64&mut length) -> SerdeError;
+    fn sequence_has_next(Self&mut self) -> bool;
+    fn end_sequence(Self&mut self) -> SerdeError;
+    fn begin_map(Self&mut self, i64&mut length) -> SerdeError;
+    fn map_has_next(Self&mut self) -> bool;
+    fn read_key(Self&mut self, usize&mut data, i64&mut length) -> SerdeError;
+    fn end_map(Self&mut self) -> SerdeError;
+}
+
+public trait Deserialize {
+    fn deserialize(Self&mut self, dyn Deserializer deserializer) -> SerdeError;
+}
+
+public fn decode<T: Deserialize>(T&mut value, dyn Deserializer deserializer) -> SerdeError {
+    return value.deserialize(deserializer);
+}
+
+impl Deserialize for bool {
+    fn deserialize(bool&mut self, dyn Deserializer deserializer) -> SerdeError {
+        return deserializer.read_bool(self);
+    }
+}
+
+impl Deserialize for i64 {
+    fn deserialize(i64&mut self, dyn Deserializer deserializer) -> SerdeError {
+        return deserializer.read_i64(self);
+    }
+}
+
+impl Deserialize for u64 {
+    fn deserialize(u64&mut self, dyn Deserializer deserializer) -> SerdeError {
+        return deserializer.read_u64(self);
+    }
+}
+
+impl Deserialize for f64 {
+    fn deserialize(f64&mut self, dyn Deserializer deserializer) -> SerdeError {
+        return deserializer.read_f64(self);
+    }
+}

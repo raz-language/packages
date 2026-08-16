@@ -1,0 +1,270 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace uuid;
+import crypto::secure;
+import std::time;
+/// Compact 128-bit UUID value stored in RFC 9562/network byte order.
+/// `high` contains bytes 0..7 and `low` contains bytes 8..15.
+public struct Uuid {
+    u64 high;
+    u64 low;
+}
+
+fn load_byte(usize address) -> u8 {
+    unsafe {
+        return *((address)as u8*const);
+    }
+}
+
+fn store_byte(usize address, u8 value) {
+    unsafe {
+        *((address)as u8*mut) = value;
+    }
+}
+
+fn load_be64(usize input) -> u64 {
+    u64 value = 0;
+    i64 index = 0;
+
+    while (index < 8) {
+        value = (value << 8) | (load_byte(input + index)as u64);
+        index += 1;
+    }
+    return value;
+}
+
+fn store_be64(usize output, u64 value) {
+    i64 index = 7;
+
+    while (index >= 0) {
+        store_byte(output + index, (value & 255)as u8);
+        value >>= 8;
+        index -= 1;
+    }
+}
+
+fn hex_value(u8 byte) -> i64 {
+    if (byte >= 48 && byte <= 57) {
+        return (byte - 48)as i64;
+    }
+
+    u8 folded = byte | 32;
+
+    if (folded >= 97 && folded <= 102) {
+        return (folded - 87)as i64;
+    }
+    return -1;
+}
+
+fn hex_digit(u8 value) -> u8 {
+    if (value < 10) {
+        return 48 + value;
+    }
+    return 87 + value;
+}
+
+public fn nil() -> Uuid {
+    return Uuid {
+        high: 0,
+        low: 0
+    };
+}
+
+public fn from_parts(u64 high, u64 low) -> Uuid {
+    return Uuid {
+        high: high,
+        low: low
+    };
+}
+
+public fn high(Uuid& value) -> u64 {
+    return value.high;
+}
+
+public fn low(Uuid& value) -> u64 {
+    return value.low;
+}
+
+public fn is_nil(Uuid& value) -> bool {
+    return value.high == 0 && value.low == 0;
+}
+
+public fn equal(Uuid& left, Uuid& right) -> bool {
+    return left.high == right.high && left.low == right.low;
+}
+
+/// Lexicographic comparison in canonical UUID byte order.
+public fn compare(Uuid& left, Uuid& right) -> i64 {
+    if (left.high < right.high) {
+        return -1;
+    }
+    if (left.high > right.high) {
+        return 1;
+    }
+    if (left.low < right.low) {
+        return -1;
+    }
+    if (left.low > right.low) {
+        return 1;
+    }
+    return 0;
+}
+
+public fn from_bytes(usize input, Uuid&mut output) -> bool {
+    if (input == 0) {
+        return false;
+    }
+    output.high = load_be64(input);
+    output.low = load_be64(input + 8);
+    return true;
+}
+
+public fn write_bytes(Uuid& value, usize output) -> bool {
+    if (output == 0) {
+        return false;
+    }
+    store_be64(output, value.high);
+    store_be64(output + 8, value.low);
+    return true;
+}
+
+/// Returns the UUID version nibble, or 0 for values without an RFC version.
+public fn version(Uuid& value) -> i64 {
+    return ((value.high >> 12) & 15)as i64;
+}
+
+/// Returns true for the RFC 4122 / RFC 9562 `10xx` variant.
+public fn is_rfc_variant(Uuid& value) -> bool {
+    return ((value.low >> 62) & 3) == 2;
+}
+
+/// Generate an RFC 9562 UUID version 4 using operating-system entropy.
+public fn v4(Uuid&mut output) -> bool {
+    u8 bytes[16];
+
+    if (!crypto::secure::random_fill(&mut bytes[0]as usize, 16)) {
+        return false;
+    }
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    return from_bytes(&bytes[0]as usize, output);
+}
+
+/// Generate an RFC 9562 UUID version 7. The first 48 bits contain Unix epoch
+/// milliseconds, making ordinary byte-order comparison time-sortable.
+public fn v7(Uuid&mut output) -> bool {
+    i64 now = std::time::unix_millis();
+
+    if (now < 0 || now > 281474976710655) {
+        return false;
+    }
+
+    u8 bytes[16];
+
+    if (!crypto::secure::random_fill(&mut bytes[0]as usize, 16)) {
+        return false;
+    }
+
+    u64 timestamp = now as u64;
+
+    bytes[0] = ((timestamp >> 40) & 255)as u8;
+    bytes[1] = ((timestamp >> 32) & 255)as u8;
+    bytes[2] = ((timestamp >> 24) & 255)as u8;
+    bytes[3] = ((timestamp >> 16) & 255)as u8;
+    bytes[4] = ((timestamp >> 8) & 255)as u8;
+    bytes[5] = (timestamp & 255)as u8;
+    bytes[6] = (bytes[6] & 15) | 112;
+    bytes[8] = (bytes[8] & 63) | 128;
+    return from_bytes(&bytes[0]as usize, output);
+}
+
+/// Extract the 48-bit Unix millisecond timestamp from a UUIDv7.
+/// Returns -1 when the value is not an RFC variant UUIDv7.
+public fn v7_unix_millis(Uuid& value) -> i64 {
+    if (version(value) != 7 || !is_rfc_variant(value)) {
+        return -1;
+    }
+    return (value.high >> 16)as i64;
+}
+
+/// Parse the strict 36-byte canonical representation:
+/// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`.
+public fn parse(usize input, i64 length, Uuid&mut output) -> bool {
+    if (input == 0 || length != 36) {
+        return false;
+    }
+    if (
+        load_byte(input + 8) != 45 ||
+        load_byte(input + 13) != 45 ||
+        load_byte(input + 18) != 45 ||
+        load_byte(input + 23) != 45
+    ) {
+        return false;
+    }
+
+    u8 bytes[16];
+    i64 source = 0;
+    i64 destination = 0;
+
+    while (source < 36) {
+        if (source == 8 || source == 13 || source == 18 || source == 23) {
+            source += 1;
+        }
+
+        i64 high_digit = hex_value(load_byte(input + source));
+        i64 low_digit = hex_value(load_byte(input + source + 1));
+
+        if (high_digit < 0 || low_digit < 0) {
+            return false;
+        }
+        bytes[destination] = ((high_digit << 4) | low_digit)as u8;
+        destination += 1;
+        source += 2;
+    }
+    return from_bytes(&bytes[0]as usize, output);
+}
+
+/// Write the lowercase 36-byte canonical representation. No terminator is
+/// written; callers that need C text should provide and append byte 37.
+public fn format(Uuid& value, usize output, i64 capacity) -> bool {
+    if (output == 0 || capacity < 36) {
+        return false;
+    }
+
+    u8 bytes[16];
+
+    if (!write_bytes(value, &mut bytes[0]as usize)) {
+        return false;
+    }
+
+    i64 source = 0;
+    i64 destination = 0;
+
+    while (source < 16) {
+        if (destination == 8 || destination == 13 || destination == 18 || destination == 23) {
+            store_byte(output + destination, 45);
+            destination += 1;
+        }
+
+        u8 byte = bytes[source];
+
+        store_byte(output + destination, hex_digit(byte >> 4));
+        store_byte(output + destination + 1, hex_digit(byte & 15));
+        source += 1;
+        destination += 2;
+    }
+    return true;
+}
+
+public fn version_major() -> i64 {
+    return 0;
+}
+
+public fn version_minor() -> i64 {
+    return 2;
+}
+
+public fn version_patch() -> i64 {
+    return 0;
+}

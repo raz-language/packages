@@ -1,0 +1,19 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace toml;
+public import toml::error;
+public import toml::document;
+public import toml::parser;
+
+public fn version_major() -> i64 {
+    return 0;
+}
+
+public fn version_minor() -> i64 {
+    return 2;
+}
+
+public fn version_patch() -> i64 {
+    return 0;
+}

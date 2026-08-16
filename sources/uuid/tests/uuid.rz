@@ -1,0 +1,53 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import uuid;
+
+fn main() -> i64 {
+    u8 text[36] = [48, 49, 56, 57, 48, 99, 102, 101, 45, 54, 53, 54, 55, 45, 55, 56, 57, 97, 45, 98, 99, 100, 101, 45, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97];
+    Uuid parsed = uuid::nil();
+
+    if (!uuid::parse(&text[0]as usize, 36, &mut parsed)) {
+        return 1;
+    }
+    if (uuid::version(&parsed) != 7 || !uuid::is_rfc_variant(&parsed)) {
+        return 2;
+    }
+
+    u8 encoded[36];
+
+    if (!uuid::format(&parsed, &mut encoded[0]as usize, 36)) {
+        return 3;
+    }
+
+    i64 index = 0;
+
+    while (index < 36) {
+        if (encoded[index] != text[index]) {
+            return 4;
+        }
+        index += 1;
+    }
+
+    Uuid random_v4 = uuid::nil();
+
+    if (!uuid::v4(&mut random_v4)) {
+        return 5;
+    }
+    if (uuid::version(&random_v4) != 4 || !uuid::is_rfc_variant(&random_v4)) {
+        return 6;
+    }
+
+    Uuid random_v7 = uuid::nil();
+
+    if (!uuid::v7(&mut random_v7)) {
+        return 7;
+    }
+    if (uuid::version(&random_v7) != 7 || !uuid::is_rfc_variant(&random_v7)) {
+        return 8;
+    }
+    if (uuid::v7_unix_millis(&random_v7) < 0) {
+        return 9;
+    }
+    return 0;
+}

@@ -1,0 +1,485 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace semver::requirement;
+import semver::version;
+
+fn byte_at(usize data, i64 index) -> u8 {
+    unsafe {
+        return *((data + index)as u8*const);
+    }
+}
+
+fn is_space(u8 byte) -> bool {
+    return byte == 32 || byte == 9 || byte == 10 || byte == 13;
+}
+
+fn is_digit(u8 byte) -> bool {
+    return byte >= 48 && byte <= 57;
+}
+
+fn trim_start(usize data, i64 length, i64&mut offset) {
+    i64 current = *offset;
+
+    while (current < length && is_space(byte_at(data, current))) {
+        current += 1;
+    }
+    *offset = current;
+}
+
+fn trim_end(usize data, i64 start, i64 end) -> i64 {
+    while (end > start && is_space(byte_at(data, end - 1))) {
+        end -= 1;
+    }
+    return end;
+}
+
+fn parse_component(usize data, i64 start, i64 end, u64&mut output) -> bool {
+    if (start >= end) {
+        return false;
+    }
+    if (end - start > 1 && byte_at(data, start) == 48) {
+        return false;
+    }
+
+    u64 value = 0;
+    i64 index = start;
+
+    while (index < end) {
+        u8 byte = byte_at(data, index);
+
+        if (!is_digit(byte)) {
+            return false;
+        }
+
+        u64 digit = (byte - 48)as u64;
+
+        if (value > 1844674407370955161 || (value == 1844674407370955161 && digit > 5)) {
+            return false;
+        }
+        value = value * 10 + digit;
+        index += 1;
+    }
+    *output = value;
+    return true;
+}
+
+fn wildcard_byte(u8 byte) -> bool {
+    return byte == 42 || byte == 120 || byte == 88;
+}
+
+/// Parse `1`, `1.2`, `1.2.3`, and wildcard forms into a core version.
+/// `parts` is the number of concrete numeric components before a wildcard.
+fn parse_partial(usize data, i64 length, Version&mut output, i64&mut parts, bool&mut wildcard) -> bool {
+    if (length <= 0) {
+        return false;
+    }
+    if (length == 1 && wildcard_byte(byte_at(data, 0))) {
+        *output = semver::version::empty();
+        *parts = 0;
+        *wildcard = true;
+        return true;
+    }
+
+    i64 ends[3] = [0, 0, 0];
+    i64 starts[3] = [0, 0, 0];
+    i64 count = 0;
+    i64 start = 0;
+    i64 index = 0;
+
+    while (index <= length) {
+        if (index == length || byte_at(data, index) == 46) {
+            if (count >= 3 || start == index) {
+                return false;
+            }
+            starts[count] = start;
+            ends[count] = index;
+            count += 1;
+            start = index + 1;
+        }
+        index += 1;
+    }
+
+    u64 values[3] = [0, 0, 0];
+    i64 concrete = 0;
+    i64 item = 0;
+    bool saw_wildcard = false;
+
+    while (item < count) {
+        i64 component_length = ends[item] - starts[item];
+
+        if (component_length == 1 && wildcard_byte(byte_at(data, starts[item]))) {
+            saw_wildcard = true;
+        } else {
+            if (saw_wildcard) {
+                return false;
+            }
+            if (!parse_component(data, starts[item], ends[item], &mut values[item])) {
+                return false;
+            }
+            concrete += 1;
+        }
+        item += 1;
+    }
+    *output = Version {
+        major: values[0],
+        minor: values[1],
+        patch: values[2],
+        prerelease: 0,
+        prerelease_length: 0,
+        build: 0,
+        build_length: 0,
+    };
+    *parts = concrete;
+    *wildcard = saw_wildcard || count < 3;
+    return true;
+}
+
+fn increment_major(Version& base) -> Version {
+    return Version {
+        major: base.major + 1,
+        minor: 0,
+        patch: 0,
+        prerelease: 0,
+        prerelease_length: 0,
+        build: 0,
+        build_length: 0,
+    };
+}
+
+fn increment_minor(Version& base) -> Version {
+    return Version {
+        major: base.major,
+        minor: base.minor + 1,
+        patch: 0,
+        prerelease: 0,
+        prerelease_length: 0,
+        build: 0,
+        build_length: 0,
+    };
+}
+
+fn increment_patch(Version& base) -> Version {
+    return Version {
+        major: base.major,
+        minor: base.minor,
+        patch: base.patch + 1,
+        prerelease: 0,
+        prerelease_length: 0,
+        build: 0,
+        build_length: 0,
+    };
+}
+
+fn matches_wildcard(Version& version, Version& base, i64 parts) -> bool {
+    if (parts == 0) {
+        return true;
+    }
+    if (version.major != base.major) {
+        return false;
+    }
+    if (parts == 1) {
+        return true;
+    }
+    if (version.minor != base.minor) {
+        return false;
+    }
+    if (parts == 2) {
+        return true;
+    }
+    return version.patch == base.patch;
+}
+
+fn match_exact_or_partial(Version& version, usize data, i64 length) -> bool {
+    Version exact = semver::version::empty();
+
+    if (semver::version::parse(data, length, &mut exact)) {
+        return semver::version::compare(version, &exact) == 0;
+    }
+
+    Version base = semver::version::empty();
+    i64 parts = 0;
+    bool wildcard = false;
+
+    if (!parse_partial(data, length, &mut base, &mut parts, &mut wildcard)) {
+        return false;
+    }
+    if (!wildcard && parts == 3) {
+        return semver::version::compare(version, &base) == 0;
+    }
+    return matches_wildcard(version, &base, parts);
+}
+
+fn match_caret(Version& version, usize data, i64 length) -> bool {
+    Version base = semver::version::empty();
+
+    if (!semver::version::parse(data, length, &mut base)) {
+        i64 parts = 0;
+        bool wildcard = false;
+
+        if (!parse_partial(data, length, &mut base, &mut parts, &mut wildcard) || parts == 0) {
+            return false;
+        }
+    }
+
+    Version upper = semver::version::empty();
+
+    if (base.major > 0) {
+        upper = increment_major(&base);
+    } else if (base.minor > 0) {
+        upper = increment_minor(&base);
+    } else {
+        upper = increment_patch(&base);
+    }
+    return semver::version::compare(version, &base) >= 0 && semver::version::compare(version, &upper) < 0;
+}
+
+fn match_tilde(Version& version, usize data, i64 length) -> bool {
+    Version base = semver::version::empty();
+    i64 parts = 3;
+    bool wildcard = false;
+
+    if (!semver::version::parse(data, length, &mut base)) {
+        if (!parse_partial(data, length, &mut base, &mut parts, &mut wildcard) || parts == 0) {
+            return false;
+        }
+    }
+
+    Version upper = semver::version::empty();
+
+    if (parts <= 1) {
+        upper = increment_major(&base);
+    } else {
+        upper = increment_minor(&base);
+    }
+    return semver::version::compare(version, &base) >= 0 && semver::version::compare(version, &upper) < 0;
+}
+
+fn match_comparator(Version& version, usize data, i64 length) -> bool {
+    i64 offset = 0;
+
+    trim_start(data, length, &mut offset);
+
+    i64 end = trim_end(data, offset, length);
+
+    if (offset >= end) {
+        return true;
+    }
+
+    u8 first = byte_at(data, offset);
+
+    if (first == 94) {
+        return match_caret(version, data + offset + 1, end - offset - 1);
+    }
+    if (first == 126) {
+        return match_tilde(version, data + offset + 1, end - offset - 1);
+    }
+
+    i64 operator = 0;
+
+    if (first == 62 || first == 60 || first == 61) {
+        operator = first as i64;
+        offset += 1;
+        if (offset < end && byte_at(data, offset) == 61 && (operator == 62 || operator == 60)) {
+            operator = operator * 256 + 61;
+            offset += 1;
+        }
+    }
+    if (offset >= end) {
+        return false;
+    }
+    if (operator == 0 || operator == 61) {
+        return match_exact_or_partial(version, data + offset, end - offset);
+    }
+
+    Version target = semver::version::empty();
+
+    if (!semver::version::parse(data + offset, end - offset, &mut target)) {
+        Version partial = semver::version::empty();
+        i64 parts = 0;
+        bool wildcard = false;
+
+        if (
+            !parse_partial(data + offset, end - offset, &mut partial, &mut parts, &mut wildcard) ||
+            wildcard
+        ) {
+            return false;
+        }
+        target = partial;
+    }
+
+    i64 result = semver::version::compare(version, &target);
+
+    if (operator == 62) {
+        return result > 0;
+    }
+    if (operator == 60) {
+        return result < 0;
+    }
+    if (operator == 62 * 256 + 61) {
+        return result >= 0;
+    }
+    if (operator == 60 * 256 + 61) {
+        return result <= 0;
+    }
+    return false;
+}
+
+fn find_hyphen_range(usize data, i64 start, i64 end, i64&mut dash) -> bool {
+    i64 index = start + 1;
+
+    while (index + 1 < end) {
+        if (
+            byte_at(data, index) == 45 &&
+            is_space(byte_at(data, index - 1)) &&
+            is_space(byte_at(data, index + 1))
+        ) {
+            *dash = index;
+            return true;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn match_hyphen(Version& version, usize data, i64 start, i64 end, i64 dash) -> bool {
+    i64 left_start = start;
+
+    trim_start(data, end, &mut left_start);
+
+    i64 left_end = trim_end(data, left_start, dash);
+    i64 right_start = dash + 1;
+
+    trim_start(data, end, &mut right_start);
+
+    i64 right_end = trim_end(data, right_start, end);
+    Version low = semver::version::empty();
+    Version high = semver::version::empty();
+    i64 low_parts = 0;
+    i64 high_parts = 0;
+    bool low_wild = false;
+    bool high_wild = false;
+
+    if (!parse_partial(data + left_start, left_end - left_start, &mut low, &mut low_parts, &mut low_wild)) {
+        if (!semver::version::parse(data + left_start, left_end - left_start, &mut low)) {
+            return false;
+        }
+        low_parts = 3;
+    }
+    if (
+        !parse_partial(
+            data + right_start,
+            right_end - right_start,
+            &mut high,
+            &mut high_parts,
+            &mut high_wild,
+        )
+    ) {
+        if (!semver::version::parse(data + right_start, right_end - right_start, &mut high)) {
+            return false;
+        }
+        high_parts = 3;
+    }
+    if (semver::version::compare(version, &low) < 0) {
+        return false;
+    }
+    if (high_parts == 1) {
+        Version upper = increment_major(&high);
+
+        return semver::version::compare(version, &upper) < 0;
+    }
+    if (high_parts == 2) {
+        Version upper = increment_minor(&high);
+
+        return semver::version::compare(version, &upper) < 0;
+    }
+    return semver::version::compare(version, &high) <= 0;
+}
+
+fn match_and_group(Version& version, usize data, i64 start, i64 end) -> bool {
+    i64 check = start;
+
+    trim_start(data, end, &mut check);
+    if (check >= end) {
+        return false;
+    }
+
+    i64 dash = -1;
+
+    if (find_hyphen_range(data, start, end, &mut dash)) {
+        return match_hyphen(version, data, start, end, dash);
+    }
+
+    i64 offset = start;
+
+    while (offset < end) {
+        while (offset < end && (is_space(byte_at(data, offset)) || byte_at(data, offset) == 44)) {
+            offset += 1;
+        }
+        if (offset >= end) {
+            break;
+        }
+
+        i64 token_start = offset;
+
+        while (offset < end && !is_space(byte_at(data, offset)) && byte_at(data, offset) != 44) {
+            offset += 1;
+        }
+        if (!match_comparator(version, data + token_start, offset - token_start)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Evaluate a package-manager style requirement. Supported forms include exact
+/// versions, partial/wildcard versions, `^`, `~`, comparison operators,
+/// whitespace/comma AND groups, hyphen ranges, and `||` alternatives.
+public fn satisfies(Version& version, usize requirement, i64 length) -> bool {
+    if (requirement == 0 || length <= 0) {
+        return false;
+    }
+
+    i64 group_start = 0;
+    i64 index = 0;
+
+    while (index <= length) {
+        bool boundary = index == length;
+
+        if (
+            !boundary &&
+            index + 1 < length &&
+            byte_at(requirement, index) == 124 &&
+            byte_at(requirement, index + 1) == 124
+        ) {
+            boundary = true;
+        }
+        if (boundary) {
+            if (match_and_group(version, requirement, group_start, index)) {
+                return true;
+            }
+            if (index == length) {
+                break;
+            }
+            index += 2;
+            group_start = index;
+            continue;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+public fn parse_and_satisfies(
+    usize version_text,
+    i64 version_length,
+    usize requirement,
+    i64 requirement_length,
+) -> bool {
+    Version version = semver::version::empty();
+
+    if (!semver::version::parse(version_text, version_length, &mut version)) {
+        return false;
+    }
+    return satisfies(&version, requirement, requirement_length);
+}

@@ -1,0 +1,191 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto::hash::sha512;
+public const i64 DIGEST_SIZE = 64;
+public const i64 BLOCK_SIZE = 128;
+
+public struct Sha512 {
+    u64 state[8];
+    u8 buffer[128];
+    i64 buffer_length;
+    u64 total_length;
+}
+
+fn rotr(u64 value, i64 amount) -> u64 {
+    return (value >> amount) | (value << (64 - amount));
+}
+
+fn load_be64(usize p) -> u64 {
+    u64 v = 0;
+    i64 i = 0;
+
+    while (i < 8) {
+        unsafe {
+            v = (v << 8) | (*((p + i)as u8*const)as u64);
+        }
+        i += 1;
+    }
+    return v;
+}
+
+fn store_be64(usize p, u64 v) {
+    i64 i = 0;
+
+    while (i < 8) {
+        unsafe {
+            *((p + i)as u8*mut) = (v >> ((7 - i) * 8))as u8;
+        }
+        i += 1;
+    }
+}
+
+fn transform(Sha512&mut ctx, usize block) {
+    u64 k[80] = [0x428a2f98d728ae22 as u64, 0x7137449123ef65cd as u64, 0xb5c0fbcfec4d3b2f as u64, 0xe9b5dba58189dbbc as u64, 0x3956c25bf348b538 as u64, 0x59f111f1b605d019 as u64, 0x923f82a4af194f9b as u64, 0xab1c5ed5da6d8118 as u64, 0xd807aa98a3030242 as u64, 0x12835b0145706fbe as u64, 0x243185be4ee4b28c as u64, 0x550c7dc3d5ffb4e2 as u64, 0x72be5d74f27b896f as u64, 0x80deb1fe3b1696b1 as u64, 0x9bdc06a725c71235 as u64, 0xc19bf174cf692694 as u64, 0xe49b69c19ef14ad2 as u64, 0xefbe4786384f25e3 as u64, 0x0fc19dc68b8cd5b5 as u64, 0x240ca1cc77ac9c65 as u64, 0x2de92c6f592b0275 as u64, 0x4a7484aa6ea6e483 as u64, 0x5cb0a9dcbd41fbd4 as u64, 0x76f988da831153b5 as u64, 0x983e5152ee66dfab as u64, 0xa831c66d2db43210 as u64, 0xb00327c898fb213f as u64, 0xbf597fc7beef0ee4 as u64, 0xc6e00bf33da88fc2 as u64, 0xd5a79147930aa725 as u64, 0x06ca6351e003826f as u64, 0x142929670a0e6e70 as u64, 0x27b70a8546d22ffc as u64, 0x2e1b21385c26c926 as u64, 0x4d2c6dfc5ac42aed as u64, 0x53380d139d95b3df as u64, 0x650a73548baf63de as u64, 0x766a0abb3c77b2a8 as u64, 0x81c2c92e47edaee6 as u64, 0x92722c851482353b as u64, 0xa2bfe8a14cf10364 as u64, 0xa81a664bbc423001 as u64, 0xc24b8b70d0f89791 as u64, 0xc76c51a30654be30 as u64, 0xd192e819d6ef5218 as u64, 0xd69906245565a910 as u64, 0xf40e35855771202a as u64, 0x106aa07032bbd1b8 as u64, 0x19a4c116b8d2d0c8 as u64, 0x1e376c085141ab53 as u64, 0x2748774cdf8eeb99 as u64, 0x34b0bcb5e19b48a8 as u64, 0x391c0cb3c5c95a63 as u64, 0x4ed8aa4ae3418acb as u64, 0x5b9cca4f7763e373 as u64, 0x682e6ff3d6b2b8a3 as u64, 0x748f82ee5defb2fc as u64, 0x78a5636f43172f60 as u64, 0x84c87814a1f0ab72 as u64, 0x8cc702081a6439ec as u64, 0x90befffa23631e28 as u64, 0xa4506cebde82bde9 as u64, 0xbef9a3f7b2c67915 as u64, 0xc67178f2e372532b as u64, 0xca273eceea26619c as u64, 0xd186b8c721c0c207 as u64, 0xeada7dd6cde0eb1e as u64, 0xf57d4f7fee6ed178 as u64, 0x06f067aa72176fba as u64, 0x0a637dc5a2c898a6 as u64, 0x113f9804bef90dae as u64, 0x1b710b35131c471b as u64, 0x28db77f523047d84 as u64, 0x32caab7b40c72493 as u64, 0x3c9ebe0a15c9bebc as u64, 0x431d67c49c100d4c as u64, 0x4cc5d4becb3e42b6 as u64, 0x597f299cfc657e2a as u64, 0x5fcb6fab3ad6faec as u64, 0x6c44198c4a475817 as u64];
+    u64 w[80];
+    i64 i = 0;
+
+    while (i < 16) {
+        w[i] = load_be64(block + i * 8);
+        i += 1;
+    }
+    while (i < 80) {
+        u64 s0 = rotr(w[i - 15], 1) ^ rotr(w[i - 15], 8) ^ (w[i - 15] >> 7);
+        u64 s1 = rotr(w[i - 2], 19) ^ rotr(w[i - 2], 61) ^ (w[i - 2] >> 6);
+
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        i += 1;
+    }
+
+    u64 a = ctx.state[0];
+    u64 b = ctx.state[1];
+    u64 c = ctx.state[2];
+    u64 d = ctx.state[3];
+    u64 e = ctx.state[4];
+    u64 f = ctx.state[5];
+    u64 g = ctx.state[6];
+    u64 h = ctx.state[7];
+
+    i = 0;
+    while (i < 80) {
+        u64 s1 = rotr(e, 14) ^ rotr(e, 18) ^ rotr(e, 41);
+        u64 ch = (e & f) ^ ((~e)&g);
+        u64 t1 = h + s1 + ch + k[i] + w[i];
+        u64 s0 = rotr(a, 28) ^ rotr(a, 34) ^ rotr(a, 39);
+        u64 maj = (a & b) ^ (a & c) ^ (b & c);
+        u64 t2 = s0 + maj;
+
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2;
+        i += 1;
+    }
+    ctx.state[0] += a;
+    ctx.state[1] += b;
+    ctx.state[2] += c;
+    ctx.state[3] += d;
+    ctx.state[4] += e;
+    ctx.state[5] += f;
+    ctx.state[6] += g;
+    ctx.state[7] += h;
+}
+
+public fn init(Sha512&mut ctx) {
+    ctx.state[0] = 0x6a09e667f3bcc908 as u64;
+    ctx.state[1] = 0xbb67ae8584caa73b as u64;
+    ctx.state[2] = 0x3c6ef372fe94f82b as u64;
+    ctx.state[3] = 0xa54ff53a5f1d36f1 as u64;
+    ctx.state[4] = 0x510e527fade682d1 as u64;
+    ctx.state[5] = 0x9b05688c2b3e6c1f as u64;
+    ctx.state[6] = 0x1f83d9abfb41bd6b as u64;
+    ctx.state[7] = 0x5be0cd19137e2179 as u64;
+    ctx.buffer_length = 0;
+    ctx.total_length = 0;
+}
+
+public fn update(Sha512&mut ctx, usize input, i64 length) -> bool {
+    if (length < 0 || (length > 0 && input == 0)) {
+        return false;
+    }
+
+    i64 off = 0;
+
+    ctx.total_length += length as u64;
+    while (off < length) {
+        i64 take = BLOCK_SIZE - ctx.buffer_length;
+
+        if (take > length - off) {
+            take = length - off;
+        }
+
+        i64 j = 0;
+
+        while (j<take) {
+            unsafe {
+                ctx.buffer[ctx.buffer_length + j] = *((input + off + j)as u8*const);
+            }
+            j += 1;
+        }
+        ctx.buffer_length += take;
+        off += take;
+        if (ctx.buffer_length == BLOCK_SIZE) {
+            transform(ctx, &ctx.buffer[0]as usize);
+            ctx.buffer_length = 0;
+        }
+    }
+    return true;
+}
+
+public fn final(Sha512&mut ctx, usize output) -> bool {
+    if (output == 0) {
+        return false;
+    }
+
+    u64 bit_low = ctx.total_length*8;
+    u64 bit_high = ctx.total_length >> 61;
+
+    ctx.buffer[ctx.buffer_length] = 0x80 as u8;
+    ctx.buffer_length += 1;
+    if (ctx.buffer_length> 112) {
+        while (ctx.buffer_length<128) {
+            ctx.buffer[ctx.buffer_length] = 0;
+            ctx.buffer_length += 1;
+        }
+        transform(ctx, &ctx.buffer[0]as usize);
+        ctx.buffer_length = 0;
+    }
+    while (ctx.buffer_length<112) {
+        ctx.buffer[ctx.buffer_length] = 0;
+        ctx.buffer_length += 1;
+    }
+
+    i64 i = 0;
+
+    while (i<8) {
+        ctx.buffer[112 + i] = (bit_high >> ((7 - i)*8))as u8;
+        ctx.buffer[120 + i] = (bit_low >> ((7 - i)*8))as u8;
+        i += 1;
+    }
+    transform(ctx, &ctx.buffer[0]as usize);
+    i = 0;
+    while (i<8) {
+        store_be64(output + i*8, ctx.state[i]);
+        i += 1;
+    }
+    return true;
+}
+
+public fn digest(usize input, i64 length, usize output) -> bool {
+    Sha512 ctx;
+
+    init(&mut ctx);
+    if (!update(&mut ctx, input, length)) {
+        return false;
+    }
+    return final(&mut ctx, output);
+}

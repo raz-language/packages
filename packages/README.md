@@ -1,3 +1,1 @@
-# Package archives
-
-Published Raz package versions live at `packages/<name>/<version>.dpk`. Existing versions on `main` are immutable.
+Published Raz package archives live here as `packages/<name>/<version>.dpk`. Existing versions are immutable.

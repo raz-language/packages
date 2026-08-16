@@ -23,6 +23,12 @@ raz update
 
 `RAZ_REGISTRY_URL` can still override the official registry for private registries, mirrors, and tests.
 
+## Source code
+
+The editable source for the official packages is kept in [`sources/`](sources/). The registry contract remains unchanged: only deterministic, immutable releases under `packages/<name>/<version>.dpk` are installable registry artifacts.
+
+This keeps the repository useful both as the canonical GitHub-backed registry and as the home of the official package implementations.
+
 ## Publishing
 
 From a Raz package directory:

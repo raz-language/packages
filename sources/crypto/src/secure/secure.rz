@@ -1,0 +1,41 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto::secure;
+import std::random;
+/// Constant-work comparison for equal-length byte strings.
+public fn equal(usize left, usize right, i64 length) -> bool {
+    if (length < 0 || (length > 0 && (left == 0 || right == 0))) {
+        return false;
+    }
+
+    u8 difference = 0;
+    i64 i = 0;
+
+    while (i < length) {
+        unsafe {
+            difference |= *((left + i)as u8*const) ^ *((right + i)as u8*const);
+        }
+        i += 1;
+    }
+    return difference == 0;
+}
+
+/// Wipes caller-owned memory. The volatile runtime barrier prevents the wipe
+/// from being optimized away at the native-code boundary.
+extern fn raz_rt_secure_zero(usize data, i64 length) -> i64;
+
+public fn zeroize(usize data, i64 length) -> bool {
+    if (length < 0 || (length > 0 && data == 0)) {
+        return false;
+    }
+    if (length == 0) {
+        return true;
+    }
+    return raz_rt_secure_zero(data, length) == 1;
+}
+
+/// Fills storage from the operating-system CSPRNG.
+public fn random_fill(usize output, i64 length) -> bool {
+    return std::random::fill(output, length);
+}

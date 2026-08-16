@@ -1,0 +1,89 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto::curve::ed25519;
+public const i64 PRIVATE_KEY_SIZE = 32;
+public const i64 PUBLIC_KEY_SIZE = 32;
+public const i64 SIGNATURE_SIZE = 64;
+// Ed25519 is exposed through Raz's permanent platform cryptography boundary.
+// The same ABI is used by the Raz package-signing implementation.
+extern fn raz_rt_ed25519_keygen(
+    usize private_key,
+    i64 private_capacity,
+    usize public_key,
+    i64 public_capacity,
+) -> i64;
+extern fn raz_rt_ed25519_public(
+    usize private_key,
+    i64 private_length,
+    usize public_key,
+    i64 public_capacity,
+) -> i64;
+extern fn raz_rt_ed25519_sign(
+    usize private_key,
+    i64 private_length,
+    usize message,
+    i64 message_length,
+    usize signature,
+    i64 signature_capacity,
+) -> i64;
+extern fn raz_rt_ed25519_verify(
+    usize public_key,
+    i64 public_length,
+    usize message,
+    i64 message_length,
+    usize signature,
+    i64 signature_length,
+) -> i64;
+
+public fn keypair(usize private_key, usize public_key) -> bool {
+    if (private_key == 0 || public_key == 0) {
+        return false;
+    }
+    return raz_rt_ed25519_keygen(
+        private_key,
+        PRIVATE_KEY_SIZE,
+        public_key,
+        PUBLIC_KEY_SIZE,
+    ) == PRIVATE_KEY_SIZE;
+}
+
+public fn public_from_private(usize public_key, usize private_key) -> bool {
+    if (public_key == 0 || private_key == 0) {
+        return false;
+    }
+    return raz_rt_ed25519_public(
+        private_key,
+        PRIVATE_KEY_SIZE,
+        public_key,
+        PUBLIC_KEY_SIZE,
+    ) == PUBLIC_KEY_SIZE;
+}
+
+public fn sign(usize signature, usize private_key, usize message, i64 message_length) -> bool {
+    if (signature == 0 || private_key == 0 || message_length < 0 || (message_length > 0 && message == 0)) {
+        return false;
+    }
+    return raz_rt_ed25519_sign(
+        private_key,
+        PRIVATE_KEY_SIZE,
+        message,
+        message_length,
+        signature,
+        SIGNATURE_SIZE,
+    ) == SIGNATURE_SIZE;
+}
+
+public fn verify(usize public_key, usize message, i64 message_length, usize signature) -> bool {
+    if (public_key == 0 || signature == 0 || message_length < 0 || (message_length > 0 && message == 0)) {
+        return false;
+    }
+    return raz_rt_ed25519_verify(
+        public_key,
+        PUBLIC_KEY_SIZE,
+        message,
+        message_length,
+        signature,
+        SIGNATURE_SIZE,
+    ) == 1;
+}

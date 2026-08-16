@@ -1,0 +1,342 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto::hash::blake3;
+public const i64 DIGEST_SIZE = 32;
+public const i64 BLOCK_SIZE = 64;
+public const i64 CHUNK_SIZE = 1024;
+const u32 CHUNK_START = 1;
+const u32 CHUNK_END = 2;
+const u32 PARENT = 4;
+const u32 ROOT = 8;
+
+struct Blake3Output {
+    u32 input_cv[8];
+    u32 block[16];
+    u64 counter;
+    u32 block_length;
+    u32 flags;
+}
+
+fn rotr(u32 value, i64 amount) -> u32 {
+    return (value >> amount) | (value << (32 - amount));
+}
+
+fn load_le32(usize input) -> u32 {
+    unsafe {
+        return (*((input + 0)as u8*const)as u32) |
+            ((*((input + 1)as u8*const)as u32) << 8) |
+            ((*((input + 2)as u8*const)as u32) << 16) |
+            ((*((input + 3)as u8*const)as u32) << 24);
+    }
+}
+
+fn store_le32(usize output, u32 value) {
+    unsafe {
+        *((output + 0)as u8*mut) = value as u8;
+        *((output + 1)as u8*mut) = (value >> 8)as u8;
+        *((output + 2)as u8*mut) = (value >> 16)as u8;
+        *((output + 3)as u8*mut) = (value >> 24)as u8;
+    }
+}
+
+fn iv(u32 output[8]) {
+    output[0] = 0x6a09e667 as u32;
+    output[1] = 0xbb67ae85 as u32;
+    output[2] = 0x3c6ef372 as u32;
+    output[3] = 0xa54ff53a as u32;
+    output[4] = 0x510e527f as u32;
+    output[5] = 0x9b05688c as u32;
+    output[6] = 0x1f83d9ab as u32;
+    output[7] = 0x5be0cd19 as u32;
+}
+
+fn g(u32 state[16], i64 a, i64 b, i64 c, i64 d, u32 x, u32 y) {
+    state[a] = state[a] + state[b] + x;
+    state[d] = rotr(state[d] ^ state[a], 16);
+    state[c] += state[d];
+    state[b] = rotr(state[b] ^ state[c], 12);
+    state[a] = state[a] + state[b] + y;
+    state[d] = rotr(state[d] ^ state[a], 8);
+    state[c] += state[d];
+    state[b] = rotr(state[b] ^ state[c], 7);
+}
+
+fn round(u32 state[16], u32 message[16]) {
+    g(state, 0, 4, 8, 12, message[0], message[1]);
+    g(state, 1, 5, 9, 13, message[2], message[3]);
+    g(state, 2, 6, 10, 14, message[4], message[5]);
+    g(state, 3, 7, 11, 15, message[6], message[7]);
+    g(state, 0, 5, 10, 15, message[8], message[9]);
+    g(state, 1, 6, 11, 12, message[10], message[11]);
+    g(state, 2, 7, 8, 13, message[12], message[13]);
+    g(state, 3, 4, 9, 14, message[14], message[15]);
+}
+
+fn permute(u32 message[16]) {
+    i64 p[16] = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8];
+    u32 copy[16];
+    i64 i = 0;
+
+    while (i < 16) {
+        copy[i] = message[p[i]];
+        i += 1;
+    }
+    i = 0;
+    while (i < 16) {
+        message[i] = copy[i];
+        i += 1;
+    }
+}
+
+fn compress(u32 cv[8], u32 block[16], u64 counter, u32 block_length, u32 flags, u32 output[16]) {
+    u32 state[16];
+    u32 message[16];
+    u32 base[8];
+
+    iv(base);
+
+    i64 i = 0;
+
+    while (i < 8) {
+        state[i] = cv[i];
+        i += 1;
+    }
+    state[8] = base[0];
+    state[9] = base[1];
+    state[10] = base[2];
+    state[11] = base[3];
+    state[12] = counter as u32;
+    state[13] = (counter >> 32)as u32;
+    state[14] = block_length;
+    state[15] = flags;
+    i = 0;
+    while (i < 16) {
+        message[i] = block[i];
+        i += 1;
+    }
+    i = 0;
+    while (i < 7) {
+        round(state, message);
+        if (i < 6) {
+            permute(message);
+        }
+        i += 1;
+    }
+    i = 0;
+    while (i < 8) {
+        output[i] = state[i] ^ state[i + 8];
+        output[i + 8] = state[i + 8] ^ cv[i];
+        i += 1;
+    }
+}
+
+fn output_cv(Blake3Output& value, u32 cv[8]) {
+    u32 words[16];
+
+    compress(value.input_cv, value.block, value.counter, value.block_length, value.flags, words);
+
+    i64 i = 0;
+
+    while (i < 8) {
+        cv[i] = words[i];
+        i += 1;
+    }
+}
+
+fn root_digest(Blake3Output& value, usize digest_output) {
+    u32 words[16];
+
+    compress(value.input_cv, value.block, 0, value.block_length, value.flags | ROOT, words);
+
+    i64 i = 0;
+
+    while (i < 8) {
+        store_le32(digest_output + i * 4, words[i]);
+        i += 1;
+    }
+}
+
+fn parent_output(u32 left[8], u32 right[8], Blake3Output&mut output) {
+    iv(output.input_cv);
+
+    i64 i = 0;
+
+    while (i < 8) {
+        output.block[i] = left[i];
+        output.block[8 + i] = right[i];
+        i += 1;
+    }
+    output.counter = 0;
+    output.block_length = 64;
+    output.flags = PARENT;
+}
+
+fn chunk_output(usize input, i64 length, u64 chunk_counter, Blake3Output&mut output) {
+    u32 cv[8];
+    u8 bytes[64];
+    u32 words[16];
+
+    iv(cv);
+
+    i64 block_count = (length + 63) / 64;
+
+    if (block_count == 0) {
+        block_count = 1;
+    }
+
+    i64 block_index = 0;
+    i64 offset = 0;
+
+    while (block_index < block_count) {
+        i64 remaining = length - offset;
+        i64 take = 64;
+
+        if (take > remaining) {
+            take = remaining;
+        }
+        if (take < 0) {
+            take = 0;
+        }
+
+        i64 i = 0;
+
+        while (i < 64) {
+            bytes[i] = 0;
+            i += 1;
+        }
+        i = 0;
+        while (i < take) {
+            unsafe {
+                bytes[i] = *((input + offset + i)as u8*const);
+            }
+            i += 1;
+        }
+        i = 0;
+        while (i < 16) {
+            words[i] = load_le32(&bytes[i * 4]as usize);
+            i += 1;
+        }
+
+        u32 flags = 0;
+
+        if (block_index == 0) {
+            flags |= CHUNK_START;
+        }
+        if (block_index + 1 == block_count) {
+            flags |= CHUNK_END;
+            i = 0;
+            while (i < 8) {
+                output.input_cv[i] = cv[i];
+                i += 1;
+            }
+            i = 0;
+            while (i < 16) {
+                output.block[i] = words[i];
+                i += 1;
+            }
+            output.counter = chunk_counter;
+            output.block_length = take as u32;
+            output.flags = flags;
+        } else {
+            u32 compressed[16];
+
+            compress(cv, words, chunk_counter, 64, flags, compressed);
+            i = 0;
+            while (i < 8) {
+                cv[i] = compressed[i];
+                i += 1;
+            }
+        }
+        offset += take;
+        block_index += 1;
+    }
+}
+
+fn parent_cv(u32 left[8], u32 right[8], u32 output[8]) {
+    Blake3Output parent;
+
+    parent_output(left, right, &mut parent);
+    output_cv(&parent, output);
+}
+
+/// Portable BLAKE3-256. Handles arbitrary input lengths without allocation.
+public fn digest(usize input, i64 length, usize output) -> bool {
+    if (length < 0 || output == 0 || (length > 0 && input == 0)) {
+        return false;
+    }
+
+    i64 chunk_count = (length + CHUNK_SIZE - 1) / CHUNK_SIZE;
+
+    if (chunk_count == 0) {
+        chunk_count = 1;
+    }
+
+    u32 stack[512];
+    i64 stack_length = 0;
+    i64 chunk_index = 0;
+
+    while (chunk_index + 1 < chunk_count) {
+        Blake3Output chunk;
+        u32 current[8];
+        i64 offset = chunk_index * CHUNK_SIZE;
+
+        chunk_output(input + offset, CHUNK_SIZE, chunk_index as u64, &mut chunk);
+        output_cv(&chunk, current);
+
+        u64 total_chunks = (chunk_index + 1)as u64;
+
+        while ((total_chunks & 1) == 0) {
+            u32 left[8];
+            i64 i = 0;
+
+            stack_length -= 1;
+            while (i < 8) {
+                left[i] = stack[stack_length * 8 + i];
+                i += 1;
+            }
+
+            u32 merged[8];
+
+            parent_cv(left, current, merged);
+            i = 0;
+            while (i < 8) {
+                current[i] = merged[i];
+                i += 1;
+            }
+            total_chunks >>= 1;
+        }
+
+        i64 i = 0;
+
+        while (i < 8) {
+            stack[stack_length * 8 + i] = current[i];
+            i += 1;
+        }
+        stack_length += 1;
+        chunk_index += 1;
+    }
+
+    i64 last_offset = (chunk_count - 1) * CHUNK_SIZE;
+    i64 last_length = length - last_offset;
+    Blake3Output root;
+
+    chunk_output(input + last_offset, last_length, (chunk_count - 1)as u64, &mut root);
+    while (stack_length > 0) {
+        u32 right[8];
+        u32 left[8];
+
+        output_cv(&root, right);
+        stack_length -= 1;
+
+        i64 i = 0;
+
+        while (i < 8) {
+            left[i] = stack[stack_length * 8 + i];
+            i += 1;
+        }
+        parent_output(left, right, &mut root);
+    }
+    root_digest(&root, output);
+    return true;
+}

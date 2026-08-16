@@ -1,0 +1,122 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto::kdf::hkdf;
+import crypto::mac::hmac;
+public const i64 SHA256_SIZE = 32;
+public const i64 SHA256_MAX_OUTPUT = 8160;
+/// RFC 5869 HKDF-Extract using HMAC-SHA-256.
+public fn extract(usize salt, i64 salt_length, usize ikm, i64 ikm_length, usize prk) -> bool {
+    if (
+        salt_length < 0 ||
+        ikm_length < 0 ||
+        prk == 0 ||
+        (salt_length > 0 && salt == 0) ||
+        (ikm_length > 0 && ikm == 0)
+    ) {
+        return false;
+    }
+    if (salt_length == 0) {
+        u8 zero_salt[32];
+        i64 i = 0;
+
+        while (i < 32) {
+            zero_salt[i] = 0;
+            i += 1;
+        }
+        return crypto::mac::hmac::sha256(&zero_salt[0]as usize, 32, ikm, ikm_length, prk);
+    }
+    return crypto::mac::hmac::sha256(salt, salt_length, ikm, ikm_length, prk);
+}
+
+/// RFC 5869 HKDF-Expand using streaming HMAC-SHA-256.
+public fn expand(
+    usize prk,
+    i64 prk_length,
+    usize info,
+    i64 info_length,
+    usize output,
+    i64 output_length,
+) -> bool {
+    if (
+        prk_length < 0 ||
+        info_length < 0 ||
+        output_length < 0 ||
+        output_length > SHA256_MAX_OUTPUT ||
+        (prk_length > 0 && prk == 0) ||
+        (info_length > 0 && info == 0) ||
+        (output_length > 0 && output == 0)
+    ) {
+        return false;
+    }
+    if (output_length == 0) {
+        return true;
+    }
+
+    u8 previous[32];
+    u8 counter_byte[1];
+    i64 generated = 0;
+    i64 previous_length = 0;
+    i64 counter = 1;
+
+    while (generated < output_length) {
+        crypto::mac::hmac::HmacSha256 hmac;
+
+        if (!crypto::mac::hmac::sha256_init(&mut hmac, prk, prk_length)) {
+            return false;
+        }
+        if (
+            previous_length > 0 &&
+            !crypto::mac::hmac::sha256_update(&mut hmac, &previous[0]as usize, previous_length)
+        ) {
+            return false;
+        }
+        if (!crypto::mac::hmac::sha256_update(&mut hmac, info, info_length)) {
+            return false;
+        }
+        counter_byte[0] = counter as u8;
+        if (
+            !crypto::mac::hmac::sha256_update(&mut hmac, &counter_byte[0]as usize, 1) ||
+            !crypto::mac::hmac::sha256_final(&mut hmac, &mut previous[0]as usize)
+        ) {
+            return false;
+        }
+
+        i64 take = 32;
+
+        if (take > output_length - generated) {
+            take = output_length - generated;
+        }
+
+        i64 i = 0;
+
+        while (i < take) {
+            unsafe {
+                *((output + generated + i)as u8*mut) = previous[i];
+            }
+            i += 1;
+        }
+        generated += take;
+        previous_length = 32;
+        counter += 1;
+    }
+    return true;
+}
+
+public fn derive(
+    usize salt,
+    i64 salt_length,
+    usize ikm,
+    i64 ikm_length,
+    usize info,
+    i64 info_length,
+    usize output,
+    i64 output_length,
+) -> bool {
+    u8 prk[32];
+
+    if (!extract(salt, salt_length, ikm, ikm_length, &mut prk[0]as usize)) {
+        return false;
+    }
+    return expand(&prk[0]as usize, 32, info, info_length, output, output_length);
+}

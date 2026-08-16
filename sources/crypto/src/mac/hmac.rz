@@ -1,0 +1,96 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto::mac::hmac;
+import crypto::hash::sha256;
+public const i64 SHA256_SIZE = 32;
+
+public struct HmacSha256 {
+    crypto::hash::sha256::Sha256 inner;
+    u8 outer_pad[64];
+}
+
+public fn sha256_init(HmacSha256&mut ctx, usize key, i64 key_length) -> bool {
+    if (key_length < 0 || (key_length > 0 && key == 0)) {
+        return false;
+    }
+
+    u8 key_block[64];
+    u8 key_hash[32];
+    i64 i = 0;
+
+    while (i < 64) {
+        key_block[i] = 0;
+        i += 1;
+    }
+    if (key_length > 64) {
+        if (!crypto::hash::sha256::digest(key, key_length, &mut key_hash[0]as usize)) {
+            return false;
+        }
+        i = 0;
+        while (i < 32) {
+            key_block[i] = key_hash[i];
+            i += 1;
+        }
+    } else {
+        i = 0;
+        while (i < key_length) {
+            unsafe {
+                key_block[i] = *((key + i)as u8*const);
+            }
+            i += 1;
+        }
+    }
+
+    u8 inner_pad[64];
+
+    i = 0;
+    while (i < 64) {
+        inner_pad[i] = key_block[i] ^ (0x36 as u8);
+        ctx.outer_pad[i] = key_block[i] ^ (0x5c as u8);
+        i += 1;
+    }
+    crypto::hash::sha256::init(&mut ctx.inner);
+    return crypto::hash::sha256::update(&mut ctx.inner, &inner_pad[0]as usize, 64);
+}
+
+public fn sha256_update(HmacSha256&mut ctx, usize input, i64 input_length) -> bool {
+    return crypto::hash::sha256::update(&mut ctx.inner, input, input_length);
+}
+
+public fn sha256_final(HmacSha256&mut ctx, usize output) -> bool {
+    if (output == 0) {
+        return false;
+    }
+
+    u8 inner_hash[32];
+
+    if (!crypto::hash::sha256::final(&mut ctx.inner, &mut inner_hash[0]as usize)) {
+        return false;
+    }
+
+    crypto::hash::sha256::Sha256 outer;
+
+    crypto::hash::sha256::init(&mut outer);
+    if (
+        !crypto::hash::sha256::update(&mut outer, &ctx.outer_pad[0]as usize, 64) ||
+        !crypto::hash::sha256::update(&mut outer, &inner_hash[0]as usize, 32)
+    ) {
+        return false;
+    }
+    return crypto::hash::sha256::final(&mut outer, output);
+}
+
+/// HMAC-SHA-256 with caller-owned 32-byte output.
+public fn sha256(usize key, i64 key_length, usize input, i64 input_length, usize output) -> bool {
+    if (input_length < 0 || (input_length > 0 && input == 0)) {
+        return false;
+    }
+
+    HmacSha256 ctx;
+
+    if (!sha256_init(&mut ctx, key, key_length) || !sha256_update(&mut ctx, input, input_length)) {
+        return false;
+    }
+    return sha256_final(&mut ctx, output);
+}

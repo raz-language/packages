@@ -1,0 +1,140 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto::aead::chacha20_poly1305;
+import crypto::cipher::chacha20;
+import crypto::mac::poly1305;
+import crypto::secure;
+public const i64 KEY_SIZE = 32;
+public const i64 NONCE_SIZE = 12;
+public const i64 TAG_SIZE = 16;
+
+fn update_padding(crypto::mac::poly1305::Poly1305&mut mac, i64 length) -> bool {
+    i64 remainder = length % 16;
+
+    if (remainder == 0) {
+        return true;
+    }
+
+    u8 zero[16];
+    i64 i = 0;
+
+    while (i < 16) {
+        zero[i] = 0;
+        i += 1;
+    }
+    return crypto::mac::poly1305::update(&mut mac, &zero[0]as usize, 16 - remainder);
+}
+
+fn update_length(crypto::mac::poly1305::Poly1305&mut mac, u64 length) -> bool {
+    u8 encoded[8];
+    i64 i = 0;
+
+    while (i < 8) {
+        encoded[i] = (length >> (i * 8))as u8;
+        i += 1;
+    }
+    return crypto::mac::poly1305::update(&mut mac, &encoded[0]as usize, 8);
+}
+
+fn tag(
+    usize key,
+    usize nonce,
+    usize aad,
+    i64 aad_length,
+    usize ciphertext,
+    i64 ciphertext_length,
+    usize output,
+) -> bool {
+    u8 first_block[64];
+
+    if (!crypto::cipher::chacha20::block(key, 0, nonce, &first_block[0]as usize)) {
+        return false;
+    }
+
+    crypto::mac::poly1305::Poly1305 mac;
+
+    if (!crypto::mac::poly1305::init(&mut mac, &first_block[0]as usize)) {
+        return false;
+    }
+    if (aad_length > 0 && !crypto::mac::poly1305::update(&mut mac, aad, aad_length)) {
+        return false;
+    }
+    if (!update_padding(&mut mac, aad_length)) {
+        return false;
+    }
+    if (ciphertext_length > 0 && !crypto::mac::poly1305::update(&mut mac, ciphertext, ciphertext_length)) {
+        return false;
+    }
+    if (!update_padding(&mut mac, ciphertext_length)) {
+        return false;
+    }
+    if (!update_length(&mut mac, aad_length as u64) || !update_length(&mut mac, ciphertext_length as u64)) {
+        return false;
+    }
+    return crypto::mac::poly1305::final(&mut mac, output);
+}
+
+/// Encrypts plaintext and writes a detached 16-byte authentication tag.
+/// Plaintext and ciphertext may alias.
+public fn encrypt(
+    usize key,
+    usize nonce,
+    usize aad,
+    i64 aad_length,
+    usize plaintext,
+    i64 plaintext_length,
+    usize ciphertext,
+    usize tag_output,
+) -> bool {
+    if (
+        key == 0 ||
+        nonce == 0 ||
+        tag_output == 0 ||
+        aad_length < 0 ||
+        plaintext_length < 0 ||
+        (aad_length > 0 && aad == 0) ||
+        (plaintext_length > 0 && (plaintext == 0 || ciphertext == 0))
+    ) {
+        return false;
+    }
+    if (!crypto::cipher::chacha20::xor(key, 1, nonce, plaintext, plaintext_length, ciphertext)) {
+        return false;
+    }
+    return tag(key, nonce, aad, aad_length, ciphertext, plaintext_length, tag_output);
+}
+
+/// Verifies the detached tag before releasing plaintext.
+/// Ciphertext and plaintext may alias.
+public fn decrypt(
+    usize key,
+    usize nonce,
+    usize aad,
+    i64 aad_length,
+    usize ciphertext,
+    i64 ciphertext_length,
+    usize expected_tag,
+    usize plaintext,
+) -> bool {
+    if (
+        key == 0 ||
+        nonce == 0 ||
+        expected_tag == 0 ||
+        aad_length < 0 ||
+        ciphertext_length < 0 ||
+        (aad_length > 0 && aad == 0) ||
+        (ciphertext_length > 0 && (ciphertext == 0 || plaintext == 0))
+    ) {
+        return false;
+    }
+
+    u8 computed[16];
+
+    if (!tag(key, nonce, aad, aad_length, ciphertext, ciphertext_length, &computed[0]as usize)) {
+        return false;
+    }
+    if (!crypto::secure::equal(&computed[0]as usize, expected_tag, 16)) {
+        return false;
+    }
+    return crypto::cipher::chacha20::xor(key, 1, nonce, ciphertext, ciphertext_length, plaintext);
+}

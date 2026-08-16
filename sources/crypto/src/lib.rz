@@ -1,0 +1,28 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto;
+public import crypto::hash::sha256;
+public import crypto::hash::sha512;
+public import crypto::hash::sha3;
+public import crypto::hash::blake3;
+public import crypto::mac::hmac;
+public import crypto::mac::poly1305;
+public import crypto::cipher::chacha20;
+public import crypto::aead::chacha20_poly1305;
+public import crypto::curve::x25519;
+public import crypto::curve::ed25519;
+public import crypto::kdf::hkdf;
+public import crypto::secure;
+
+public fn version_major() -> i64 {
+    return 0;
+}
+
+public fn version_minor() -> i64 {
+    return 4;
+}
+
+public fn version_patch() -> i64 {
+    return 0;
+}

@@ -1,0 +1,93 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import datetime::calendar;
+import datetime::types;
+import datetime::timestamp;
+import datetime::duration;
+import datetime::rfc3339;
+
+fn main() -> i64 {
+    Date epoch = Date { year: 1970, month: 1, day: 1 };
+    if (!datetime::calendar::valid(&epoch) || datetime::calendar::to_unix_days(&epoch) != 0) {
+        return 1;
+    }
+    Date leap = Date { year: 2000, month: 2, day: 29 };
+    if (!datetime::calendar::valid(&leap) || !datetime::calendar::is_leap_year(2000)) {
+        return 2;
+    }
+    if (datetime::calendar::is_leap_year(1900)) {
+        return 3;
+    }
+    Date pre = datetime::calendar::from_unix_days(-1);
+    if (pre.year != 1969 || pre.month != 12 || pre.day != 31) {
+        return 4;
+    }
+    if (datetime::calendar::weekday(&epoch) != 4) {
+        return 5;
+    }
+
+    u8 text[30] = [50,48,50,54,45,48,56,45,49,54,84,49,52,58,53,49,58,51,48,46,49,50,51,52,53,54,55,56,57,90];
+    OffsetDateTime parsed;
+    if (!datetime::rfc3339::parse(&text[0]as usize, 30, &mut parsed)) {
+        return 6;
+    }
+    if (parsed.year != 2026 || parsed.month != 8 || parsed.day != 16) {
+        return 7;
+    }
+    if (parsed.nanosecond != 123456789 || parsed.offset_seconds != 0) {
+        return 8;
+    }
+    u8 formatted[40];
+    i64 written = datetime::rfc3339::format(&parsed, &formatted[0]as usize, 40);
+    if (written != 30) {
+        return 9;
+    }
+    i64 i = 0;
+    while (i < 30) {
+        if (formatted[i] != text[i]) {
+            return 10;
+        }
+        i += 1;
+    }
+
+    u8 offset_text[25] = [50,48,50,48,45,48,49,45,48,50,84,48,51,58,48,52,58,48,53,43,48,53,58,51,48];
+    OffsetDateTime offset_value;
+    if (!datetime::rfc3339::parse(&offset_text[0]as usize, 25, &mut offset_value)) {
+        return 11;
+    }
+    if (offset_value.offset_seconds != 19800) {
+        return 12;
+    }
+    Timestamp ts;
+    if (!datetime::rfc3339::to_timestamp(&offset_value, &mut ts)) {
+        return 13;
+    }
+    UtcOffset utc = datetime::types::utc();
+    OffsetDateTime utc_value = datetime::rfc3339::from_timestamp(&ts, &utc);
+    if (utc_value.year != 2020 || utc_value.month != 1 || utc_value.day != 1) {
+        return 14;
+    }
+    if (utc_value.hour != 21 || utc_value.minute != 34 || utc_value.second != 5) {
+        return 15;
+    }
+
+    Duration one = datetime::duration::seconds(1);
+    Duration half = datetime::duration::milliseconds(500);
+    Duration sum = datetime::duration::add(&one, &half);
+    if (sum.seconds != 1 || sum.nanoseconds != 500000000) {
+        return 16;
+    }
+    Timestamp epoch_ts = datetime::timestamp::from_unix_seconds(0);
+    Timestamp later = datetime::timestamp::add(&epoch_ts, &sum);
+    if (later.seconds != 1 || later.nanoseconds != 500000000) {
+        return 17;
+    }
+
+    u8 invalid[20] = [50,48,50,51,45,48,50,45,50,57,84,48,48,58,48,48,58,48,48,90];
+    OffsetDateTime bad;
+    if (datetime::rfc3339::parse(&invalid[0]as usize, 20, &mut bad)) {
+        return 18;
+    }
+    return 0;
+}

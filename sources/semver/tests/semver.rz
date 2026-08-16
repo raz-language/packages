@@ -1,0 +1,136 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import semver::version;
+import semver::requirement;
+
+fn parse_text(usize data, i64 length, Version&mut output) -> bool {
+    return semver::version::parse(data, length, output);
+}
+
+fn main() -> i64 {
+    u8 stable_text[5] = [49, 46, 48, 46, 48];
+    u8 alpha_text[11] = [49, 46, 48, 46, 48, 45, 97, 108, 112, 104, 97];
+    u8 alpha1_text[13] = [49, 46, 48, 46, 48, 45, 97, 108, 112, 104, 97, 46, 49];
+    u8 alpha_beta_text[16] = [49, 46, 48, 46, 48, 45, 97, 108, 112, 104, 97, 46, 98, 101, 116, 97];
+    u8 beta_text[10] = [49, 46, 48, 46, 48, 45, 98, 101, 116, 97];
+    u8 beta2_text[12] = [49, 46, 48, 46, 48, 45, 98, 101, 116, 97, 46, 50];
+    u8 beta11_text[13] = [49, 46, 48, 46, 48, 45, 98, 101, 116, 97, 46, 49, 49];
+    u8 rc1_text[10] = [49, 46, 48, 46, 48, 45, 114, 99, 46, 49];
+    Version stable = semver::version::empty();
+    Version alpha = semver::version::empty();
+    Version alpha1 = semver::version::empty();
+    Version alpha_beta = semver::version::empty();
+    Version beta = semver::version::empty();
+    Version beta2 = semver::version::empty();
+    Version beta11 = semver::version::empty();
+    Version rc1 = semver::version::empty();
+
+    if (!parse_text(&stable_text[0]as usize, 5, &mut stable)) {
+        return 1;
+    }
+    if (!parse_text(&alpha_text[0]as usize, 11, &mut alpha)) {
+        return 2;
+    }
+    if (!parse_text(&alpha1_text[0]as usize, 13, &mut alpha1)) {
+        return 3;
+    }
+    if (!parse_text(&alpha_beta_text[0]as usize, 16, &mut alpha_beta)) {
+        return 4;
+    }
+    if (!parse_text(&beta_text[0]as usize, 10, &mut beta)) {
+        return 5;
+    }
+    if (!parse_text(&beta2_text[0]as usize, 12, &mut beta2)) {
+        return 6;
+    }
+    if (!parse_text(&beta11_text[0]as usize, 13, &mut beta11)) {
+        return 7;
+    }
+    if (!parse_text(&rc1_text[0]as usize, 10, &mut rc1)) {
+        return 8;
+    }
+    if (semver::version::compare(&alpha, &alpha1) >= 0) {
+        return 9;
+    }
+    if (semver::version::compare(&alpha1, &alpha_beta) >= 0) {
+        return 10;
+    }
+    if (semver::version::compare(&alpha_beta, &beta) >= 0) {
+        return 11;
+    }
+    if (semver::version::compare(&beta, &beta2) >= 0) {
+        return 12;
+    }
+    if (semver::version::compare(&beta2, &beta11) >= 0) {
+        return 13;
+    }
+    if (semver::version::compare(&beta11, &rc1) >= 0) {
+        return 14;
+    }
+    if (semver::version::compare(&rc1, &stable) >= 0) {
+        return 15;
+    }
+
+    u8 invalid_zero[6] = [48, 49, 46, 50, 46, 51];
+    Version invalid = semver::version::empty();
+
+    if (parse_text(&invalid_zero[0]as usize, 6, &mut invalid)) {
+        return 16;
+    }
+
+    u8 build_a[11] = [49, 46, 48, 46, 48, 43, 98, 117, 105, 108, 100];
+    Version with_build = semver::version::empty();
+
+    if (!parse_text(&build_a[0]as usize, 11, &mut with_build)) {
+        return 17;
+    }
+    if (!semver::version::equal(&stable, &with_build)) {
+        return 18;
+    }
+
+    u8 version_text[5] = [49, 46, 53, 46, 50];
+    Version candidate = semver::version::empty();
+
+    if (!parse_text(&version_text[0]as usize, 5, &mut candidate)) {
+        return 19;
+    }
+
+    u8 caret[6] = [94, 49, 46, 50, 46, 51];
+
+    if (!semver::requirement::satisfies(&candidate, &caret[0]as usize, 6)) {
+        return 20;
+    }
+
+    u8 tilde[6] = [126, 49, 46, 53, 46, 48];
+
+    if (!semver::requirement::satisfies(&candidate, &tilde[0]as usize, 6)) {
+        return 21;
+    }
+
+    u8 wildcard[5] = [49, 46, 53, 46, 120];
+
+    if (!semver::requirement::satisfies(&candidate, &wildcard[0]as usize, 5)) {
+        return 22;
+    }
+
+    u8 and_range[12] = [62, 61, 49, 46, 50, 32, 60, 50, 46, 48, 46, 48];
+
+    if (!semver::requirement::satisfies(&candidate, &and_range[0]as usize, 12)) {
+        return 23;
+    }
+
+    u8 or_range[14] = [60, 49, 46, 48, 32, 124, 124, 32, 62, 61, 49, 46, 53, 46];
+
+    // malformed trailing comparator/version must not accidentally match.
+    if (semver::requirement::satisfies(&candidate, &or_range[0]as usize, 14)) {
+        return 24;
+    }
+
+    u8 hyphen[13] = [49, 46, 50, 46, 48, 32, 45, 32, 49, 46, 57, 46, 48];
+
+    if (!semver::requirement::satisfies(&candidate, &hyphen[0]as usize, 13)) {
+        return 25;
+    }
+    return 0;
+}

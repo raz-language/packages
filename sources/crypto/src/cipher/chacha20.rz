@@ -1,0 +1,129 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto::cipher::chacha20;
+public const i64 KEY_SIZE = 32;
+public const i64 NONCE_SIZE = 12;
+public const i64 BLOCK_SIZE = 64;
+
+fn rotl(u32 value, i64 amount) -> u32 {
+    return (value << amount) | (value >> (32 - amount));
+}
+
+fn load_le32(usize input) -> u32 {
+    unsafe {
+        return (*((input + 0)as u8*const)as u32) |
+            ((*((input + 1)as u8*const)as u32) << 8) |
+            ((*((input + 2)as u8*const)as u32) << 16) |
+            ((*((input + 3)as u8*const)as u32) << 24);
+    }
+}
+
+fn store_le32(usize output, u32 value) {
+    unsafe {
+        *((output + 0)as u8*mut) = value as u8;
+        *((output + 1)as u8*mut) = (value >> 8)as u8;
+        *((output + 2)as u8*mut) = (value >> 16)as u8;
+        *((output + 3)as u8*mut) = (value >> 24)as u8;
+    }
+}
+
+fn quarter(u32 values[16], i64 a, i64 b, i64 c, i64 d) {
+    values[a] += values[b];
+    values[d] ^= values[a];
+    values[d] = rotl(values[d], 16);
+    values[c] += values[d];
+    values[b] ^= values[c];
+    values[b] = rotl(values[b], 12);
+    values[a] += values[b];
+    values[d] ^= values[a];
+    values[d] = rotl(values[d], 8);
+    values[c] += values[d];
+    values[b] ^= values[c];
+    values[b] = rotl(values[b], 7);
+}
+
+public fn block(usize key, u32 counter, usize nonce, usize output) -> bool {
+    if (key == 0 || nonce == 0 || output == 0) {
+        return false;
+    }
+
+    u32 state[16];
+    u32 work[16];
+
+    state[0] = 0x61707865 as u32;
+    state[1] = 0x3320646e as u32;
+    state[2] = 0x79622d32 as u32;
+    state[3] = 0x6b206574 as u32;
+
+    i64 i = 0;
+
+    while (i < 8) {
+        state[4 + i] = load_le32(key + i * 4);
+        i += 1;
+    }
+    state[12] = counter;
+    state[13] = load_le32(nonce + 0);
+    state[14] = load_le32(nonce + 4);
+    state[15] = load_le32(nonce + 8);
+    i = 0;
+    while (i < 16) {
+        work[i] = state[i];
+        i += 1;
+    }
+    i = 0;
+    while (i < 10) {
+        quarter(work, 0, 4, 8, 12);
+        quarter(work, 1, 5, 9, 13);
+        quarter(work, 2, 6, 10, 14);
+        quarter(work, 3, 7, 11, 15);
+        quarter(work, 0, 5, 10, 15);
+        quarter(work, 1, 6, 11, 12);
+        quarter(work, 2, 7, 8, 13);
+        quarter(work, 3, 4, 9, 14);
+        i += 1;
+    }
+    i = 0;
+    while (i < 16) {
+        store_le32(output + i * 4, work[i] + state[i]);
+        i += 1;
+    }
+    return true;
+}
+
+/// XORs input with the IETF ChaCha20 stream. Input and output may alias.
+public fn xor(usize key, u32 counter, usize nonce, usize input, i64 length, usize output) -> bool {
+    if (length < 0 || key == 0 || nonce == 0 || (length > 0 && (input == 0 || output == 0))) {
+        return false;
+    }
+
+    u8 stream[64];
+    i64 offset = 0;
+
+    while (offset < length) {
+        if (!block(key, counter, nonce, &stream[0]as usize)) {
+            return false;
+        }
+
+        i64 take = 64;
+
+        if (take > length - offset) {
+            take = length - offset;
+        }
+
+        i64 i = 0;
+
+        while (i < take) {
+            unsafe {
+                *((output + offset + i)as u8*mut) = *((input + offset + i)as u8*const) ^ stream[i];
+            }
+            i += 1;
+        }
+        if (counter == 0xffffffff as u32 && offset + take < length) {
+            return false;
+        }
+        counter += 1;
+        offset += take;
+    }
+    return true;
+}

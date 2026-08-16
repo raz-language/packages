@@ -1,0 +1,136 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace toml::document;
+import alloc::string;
+import alloc::vec;
+import core::bytes;
+/// Classification of a TOML value. String and date/time values remain borrowed
+/// source slices; consumers can decode them only when ownership is required.
+public enum TomlValueKind {
+    String,
+    Integer,
+    Float,
+    Bool,
+    DateTime,
+    Array,
+    InlineTable,
+}
+
+/// Top-level TOML syntax represented by the borrowed document index.
+public enum TomlNodeKind {
+    KeyValue,
+    Table,
+    ArrayTable,
+}
+
+/// A compact source-backed TOML node. Offsets always point into the document
+/// source and therefore do not require per-key or per-value allocations.
+public struct TomlNode {
+    TomlNodeKind kind;
+    TomlValueKind value_kind;
+    i64 key_offset;
+    i64 key_length;
+    i64 value_offset;
+    i64 value_length;
+    i64 line;
+    i64 column;
+}
+
+/// Parsed TOML document. `parse_borrowed` keeps the caller's bytes alive by
+/// contract; `parse_owned` stores an owned copy in `source`.
+public struct TomlDocument {
+    String source;
+    RawVec nodes;
+    usize borrowed_source;
+    i64 borrowed_length;
+    bool borrowed;
+}
+
+public fn empty() -> TomlDocument {
+    return TomlDocument {
+        source: alloc::string::with_capacity(0),
+        nodes: alloc::vec::create_aligned(size_of<TomlNode>()as i64, align_of<TomlNode>()as i64, 0),
+        borrowed_source: 0,
+        borrowed_length: 0,
+        borrowed: false,
+    };
+}
+
+public fn source_base(TomlDocument& document) -> usize {
+    if (document.borrowed) {
+        return document.borrowed_source;
+    }
+    return alloc::string::data_ptr(&document.source);
+}
+
+public fn source_view(TomlDocument& document) -> BytesView {
+    if (document.borrowed) {
+        return BytesView {
+            data: document.borrowed_source,
+            length: document.borrowed_length,
+        };
+    }
+    return BytesView {
+        data: alloc::string::data_ptr(&document.source),
+        length: alloc::string::len(&document.source),
+    };
+}
+
+public fn node_count(TomlDocument& document) -> i64 {
+    return alloc::vec::len(&document.nodes);
+}
+
+public fn node_ptr(TomlDocument& document, i64 index) -> TomlNode*const {
+    unsafe {
+        return alloc::vec::element_address(&document.nodes, index)as TomlNode*const;
+    }
+}
+
+public fn key_view(TomlDocument& document, i64 index) -> BytesView {
+    usize address = alloc::vec::element_address(&document.nodes, index);
+
+    if (address == 0) {
+        return BytesView {
+            data: 0,
+            length: 0
+        };
+    }
+    unsafe {
+        return BytesView {
+            data: source_base(document) + (*(address as TomlNode*const)).key_offset,
+            length: (*(address as TomlNode*const)).key_length,
+        };
+    }
+}
+
+public fn value_view(TomlDocument& document, i64 index) -> BytesView {
+    usize address = alloc::vec::element_address(&document.nodes, index);
+
+    if (address == 0) {
+        return BytesView {
+            data: 0,
+            length: 0
+        };
+    }
+    unsafe {
+        if ((*(address as TomlNode*const)).kind != TomlNodeKind::KeyValue) {
+            return BytesView {
+                data: 0,
+                length: 0
+            };
+        }
+        return BytesView {
+            data: source_base(document) + (*(address as TomlNode*const)).value_offset,
+            length: (*(address as TomlNode*const)).value_length,
+        };
+    }
+}
+
+public fn destroy(TomlDocument&mut document) {
+    alloc::string::destroy(&mut document.source);
+    alloc::vec::destroy(&mut document.nodes);
+    document.borrowed_source = 0;
+    document.borrowed_length = 0;
+    document.borrowed = false;
+}

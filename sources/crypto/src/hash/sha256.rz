@@ -1,0 +1,185 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace crypto::hash::sha256;
+public const i64 DIGEST_SIZE = 32;
+public const i64 BLOCK_SIZE = 64;
+
+public struct Sha256 {
+    u32 state[8];
+    u8 buffer[64];
+    i64 buffer_length;
+    u64 total_length;
+}
+
+fn rotr(u32 value, i64 amount) -> u32 {
+    return (value >> amount) | (value << (32 - amount));
+}
+
+fn load_be32(usize input) -> u32 {
+    unsafe {
+        return ((*((input + 0)as u8*const)as u32) << 24) |
+            ((*((input + 1)as u8*const)as u32) << 16) |
+            ((*((input + 2)as u8*const)as u32) << 8) |
+            (*((input + 3)as u8*const)as u32);
+    }
+}
+
+fn store_be32(usize output, u32 value) {
+    unsafe {
+        *((output + 0)as u8*mut) = (value >> 24)as u8;
+        *((output + 1)as u8*mut) = (value >> 16)as u8;
+        *((output + 2)as u8*mut) = (value >> 8)as u8;
+        *((output + 3)as u8*mut) = value as u8;
+    }
+}
+
+fn transform(Sha256&mut ctx, usize block) {
+    u32 k[64] = [0x428a2f98 as u32, 0x71374491 as u32, 0xb5c0fbcf as u32, 0xe9b5dba5 as u32, 0x3956c25b as u32, 0x59f111f1 as u32, 0x923f82a4 as u32, 0xab1c5ed5 as u32, 0xd807aa98 as u32, 0x12835b01 as u32, 0x243185be as u32, 0x550c7dc3 as u32, 0x72be5d74 as u32, 0x80deb1fe as u32, 0x9bdc06a7 as u32, 0xc19bf174 as u32, 0xe49b69c1 as u32, 0xefbe4786 as u32, 0x0fc19dc6 as u32, 0x240ca1cc as u32, 0x2de92c6f as u32, 0x4a7484aa as u32, 0x5cb0a9dc as u32, 0x76f988da as u32, 0x983e5152 as u32, 0xa831c66d as u32, 0xb00327c8 as u32, 0xbf597fc7 as u32, 0xc6e00bf3 as u32, 0xd5a79147 as u32, 0x06ca6351 as u32, 0x14292967 as u32, 0x27b70a85 as u32, 0x2e1b2138 as u32, 0x4d2c6dfc as u32, 0x53380d13 as u32, 0x650a7354 as u32, 0x766a0abb as u32, 0x81c2c92e as u32, 0x92722c85 as u32, 0xa2bfe8a1 as u32, 0xa81a664b as u32, 0xc24b8b70 as u32, 0xc76c51a3 as u32, 0xd192e819 as u32, 0xd6990624 as u32, 0xf40e3585 as u32, 0x106aa070 as u32, 0x19a4c116 as u32, 0x1e376c08 as u32, 0x2748774c as u32, 0x34b0bcb5 as u32, 0x391c0cb3 as u32, 0x4ed8aa4a as u32, 0x5b9cca4f as u32, 0x682e6ff3 as u32, 0x748f82ee as u32, 0x78a5636f as u32, 0x84c87814 as u32, 0x8cc70208 as u32, 0x90befffa as u32, 0xa4506ceb as u32, 0xbef9a3f7 as u32, 0xc67178f2 as u32];
+    u32 w[64];
+    i64 i = 0;
+
+    while (i < 16) {
+        w[i] = load_be32(block + i * 4);
+        i += 1;
+    }
+    while (i < 64) {
+        u32 s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        u32 s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        i += 1;
+    }
+
+    u32 a = ctx.state[0];
+    u32 b = ctx.state[1];
+    u32 c = ctx.state[2];
+    u32 d = ctx.state[3];
+    u32 e = ctx.state[4];
+    u32 f = ctx.state[5];
+    u32 g = ctx.state[6];
+    u32 h = ctx.state[7];
+
+    i = 0;
+    while (i < 64) {
+        u32 s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+        u32 ch = (e & f) ^ ((~e) & g);
+        u32 t1 = h + s1 + ch + k[i] + w[i];
+        u32 s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+        u32 maj = (a & b) ^ (a & c) ^ (b & c);
+        u32 t2 = s0 + maj;
+
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = b;
+        b = a;
+        a = t1 + t2;
+        i += 1;
+    }
+    ctx.state[0] += a;
+    ctx.state[1] += b;
+    ctx.state[2] += c;
+    ctx.state[3] += d;
+    ctx.state[4] += e;
+    ctx.state[5] += f;
+    ctx.state[6] += g;
+    ctx.state[7] += h;
+}
+
+public fn init(Sha256&mut ctx) {
+    ctx.state[0] = 0x6a09e667 as u32;
+    ctx.state[1] = 0xbb67ae85 as u32;
+    ctx.state[2] = 0x3c6ef372 as u32;
+    ctx.state[3] = 0xa54ff53a as u32;
+    ctx.state[4] = 0x510e527f as u32;
+    ctx.state[5] = 0x9b05688c as u32;
+    ctx.state[6] = 0x1f83d9ab as u32;
+    ctx.state[7] = 0x5be0cd19 as u32;
+    ctx.buffer_length = 0;
+    ctx.total_length = 0;
+}
+
+public fn update(Sha256&mut ctx, usize input, i64 length) -> bool {
+    if (length < 0 || (length > 0 && input == 0)) {
+        return false;
+    }
+
+    i64 offset = 0;
+
+    ctx.total_length += length as u64;
+    while (offset < length) {
+        i64 take = BLOCK_SIZE - ctx.buffer_length;
+
+        if (take > length - offset) {
+            take = length - offset;
+        }
+
+        i64 j = 0;
+
+        while (j < take) {
+            unsafe {
+                ctx.buffer[ctx.buffer_length + j] = *((input + offset + j)as u8*const);
+            }
+            j += 1;
+        }
+        ctx.buffer_length += take;
+        offset += take;
+        if (ctx.buffer_length == BLOCK_SIZE) {
+            usize block = &ctx.buffer[0]as usize;
+
+            transform(ctx, block);
+            ctx.buffer_length = 0;
+        }
+    }
+    return true;
+}
+
+public fn final(Sha256&mut ctx, usize output) -> bool {
+    if (output == 0) {
+        return false;
+    }
+
+    u64 bit_length = ctx.total_length * 8;
+
+    ctx.buffer[ctx.buffer_length] = 0x80 as u8;
+    ctx.buffer_length += 1;
+    if (ctx.buffer_length > 56) {
+        while (ctx.buffer_length < 64) {
+            ctx.buffer[ctx.buffer_length] = 0;
+            ctx.buffer_length += 1;
+        }
+        transform(ctx, &ctx.buffer[0]as usize);
+        ctx.buffer_length = 0;
+    }
+    while (ctx.buffer_length < 56) {
+        ctx.buffer[ctx.buffer_length] = 0;
+        ctx.buffer_length += 1;
+    }
+
+    i64 i = 0;
+
+    while (i < 8) {
+        ctx.buffer[56 + i] = (bit_length >> ((7 - i) * 8))as u8;
+        i += 1;
+    }
+    transform(ctx, &ctx.buffer[0]as usize);
+    i = 0;
+    while (i < 8) {
+        store_be32(output + i * 4, ctx.state[i]);
+        i += 1;
+    }
+    return true;
+}
+
+public fn digest(usize input, i64 length, usize output) -> bool {
+    Sha256 ctx;
+
+    init(&mut ctx);
+    if (!update(&mut ctx, input, length)) {
+        return false;
+    }
+    return final(&mut ctx, output);
+}

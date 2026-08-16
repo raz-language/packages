@@ -1,0 +1,109 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace regex::engine;
+import regex::program;
+
+fn byte_at(usize data, i64 index) -> u8 { unsafe { return *((data + index)as u8*const); } }
+fn load_i64(usize data, i64 index) -> i64 { unsafe { return *(((data + index * 8))as i64*const); } }
+fn store_i64(usize data, i64 index, i64 value) { unsafe { *(((data + index * 8))as i64*mut) = value; } }
+
+fn class_match(Regex& regex, i64 begin, i64 end, u8 value) -> bool {
+    bool negate = false;
+    i64 cursor = begin;
+    if (cursor < end && byte_at(regex.pattern, cursor) == 94) { negate = true; cursor += 1; }
+    bool matched = false;
+    while (cursor < end) {
+        u8 first = byte_at(regex.pattern, cursor);
+        if (first == 92 && cursor + 1 < end) { cursor += 1; first = byte_at(regex.pattern, cursor); }
+        if (cursor + 2 < end && byte_at(regex.pattern, cursor + 1) == 45) {
+            u8 last = byte_at(regex.pattern, cursor + 2);
+            if (value >= first && value <= last) { matched = true; }
+            cursor += 3;
+        } else {
+            if (value == first) { matched = true; }
+            cursor += 1;
+        }
+    }
+    if (negate) { return !matched; }
+    return matched;
+}
+
+fn clear_seen(usize seen, i64 count) { i64 i = 0; while (i < count) { store_i64(seen, i, 0); i += 1; } }
+
+fn add_state(Regex& regex, i64 pc, i64 position, i64 text_length, usize states, i64&mut count, usize seen) {
+    if (pc < 0 || pc >= regex.instruction_count || load_i64(seen, pc) != 0) { return; }
+    store_i64(seen, pc, 1);
+    i64 op = regex::program::instruction_op(regex, pc);
+    if (op == regex::program::op_split()) {
+        add_state(regex, regex::program::instruction_out1(regex, pc), position, text_length, states, count, seen);
+        add_state(regex, regex::program::instruction_out2(regex, pc), position, text_length, states, count, seen);
+        return;
+    }
+    if (op == regex::program::op_bol()) {
+        if (position == 0) { add_state(regex, regex::program::instruction_out1(regex, pc), position, text_length, states, count, seen); }
+        return;
+    }
+    if (op == regex::program::op_eol()) {
+        if (position == text_length) { add_state(regex, regex::program::instruction_out1(regex, pc), position, text_length, states, count, seen); }
+        return;
+    }
+    if (*count < regex::program::MAX_INSTRUCTIONS) { store_i64(states, *count, pc); *count += 1; }
+}
+
+fn contains_match(Regex& regex, usize states, i64 count) -> bool {
+    i64 i = 0;
+    while (i < count) {
+        if (regex::program::instruction_op(regex, load_i64(states, i)) == regex::program::op_match()) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn match_from(Regex& regex, usize text, i64 text_length, i64 start, i64&mut end) -> bool {
+    i64 current_storage[256];
+    i64 next_storage[256];
+    i64 seen_storage[256];
+    usize current = current_storage as usize;
+    usize next = next_storage as usize;
+    usize seen = seen_storage as usize;
+    clear_seen(seen, regex.instruction_count);
+    i64 current_count = 0;
+    add_state(regex, regex.start, start, text_length, current, &mut current_count, seen);
+    if (contains_match(regex, current, current_count)) { *end = start; return true; }
+    i64 position = start;
+    while (position < text_length && current_count > 0) {
+        u8 value = byte_at(text, position);
+        clear_seen(seen, regex.instruction_count);
+        i64 next_count = 0;
+        i64 i = 0;
+        while (i < current_count) {
+            i64 pc = load_i64(current, i);
+            i64 op = regex::program::instruction_op(regex, pc);
+            bool consumes = false;
+            if (op == regex::program::op_char()) { consumes = value == regex::program::instruction_a(regex, pc)as u8; }
+            else if (op == regex::program::op_any()) { consumes = value != 10; }
+            else if (op == regex::program::op_class()) { consumes = class_match(regex, regex::program::instruction_a(regex, pc), regex::program::instruction_b(regex, pc), value); }
+            if (consumes) { add_state(regex, regex::program::instruction_out1(regex, pc), position + 1, text_length, next, &mut next_count, seen); }
+            i += 1;
+        }
+        position += 1;
+        if (contains_match(regex, next, next_count)) { *end = position; return true; }
+        usize swap = current; current = next; next = swap; current_count = next_count;
+    }
+    return false;
+}
+
+public fn find_from(Regex& regex, usize text, i64 text_length, i64 offset) -> Match {
+    if (text == 0 || text_length < 0 || offset < 0 || offset > text_length) { return Match { matched: false, start: -1, end: -1 }; }
+    i64 start = offset;
+    while (start <= text_length) {
+        i64 end = -1;
+        if (match_from(regex, text, text_length, start, &mut end)) { return Match { matched: true, start: start, end: end }; }
+        start += 1;
+    }
+    return Match { matched: false, start: -1, end: -1 };
+}
+
+public fn find(Regex& regex, usize text, i64 text_length) -> Match { return find_from(regex, text, text_length, 0); }
+public fn is_match(Regex& regex, usize text, i64 text_length) -> bool { return find(regex, text, text_length).matched; }

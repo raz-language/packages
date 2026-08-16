@@ -1,0 +1,27 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace serde::error;
+
+public enum SerdeError {
+    None,
+    UnexpectedEnd,
+    UnexpectedType,
+    InvalidValue,
+    InvalidUtf8,
+    DepthExceeded,
+    OutOfMemory,
+    Unsupported,
+    Custom(i64),
+}
+
+public fn success(SerdeError& error) -> bool {
+    match error {
+        SerdeError::None => {
+            return true;
+        }
+        _ => {
+            return false;
+        }
+    }
+}

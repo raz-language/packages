@@ -1,0 +1,755 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace toml::parser;
+import alloc::string;
+import alloc::vec;
+public import toml::document;
+public import toml::error;
+
+fn byte_at(usize data, i64 index) -> i64 {
+    unsafe {
+        return (*((data + index)as u8*const))as i64;
+    }
+}
+
+fn is_space(i64 byte) -> bool {
+    return byte == 32 || byte == 9 || byte == 13;
+}
+
+fn is_newline(i64 byte) -> bool {
+    return byte == 10;
+}
+
+fn is_bare_key(i64 byte) -> bool {
+    return (
+        (byte >= 48 && byte <= 57) ||
+        (byte >= 65 && byte <= 90) ||
+        (byte >= 97 && byte <= 122) ||
+        byte == 95 ||
+        byte == 45
+    );
+}
+
+fn trim_left(usize data, i64&mut start, i64 end) {
+    while (*start < end && is_space(byte_at(data, *start))) {
+        *start += 1;
+    }
+}
+
+fn trim_right(usize data, i64 start, i64&mut end) {
+    while (*end > start && is_space(byte_at(data, *end - 1))) {
+        *end -= 1;
+    }
+}
+
+fn location_for(usize data, i64 offset, i64&mut line, i64&mut column) {
+    *line = 1;
+    *column = 1;
+
+    i64 i = 0;
+
+    while (i < offset) {
+        if (byte_at(data, i) == 10) {
+            *line += 1;
+            *column = 1;
+        } else {
+            *column += 1;
+        }
+        i += 1;
+    }
+}
+
+fn error_at(usize data, i64 offset, TomlErrorKind kind) -> TomlError {
+    i64 line = 1;
+    i64 column = 1;
+
+    location_for(data, offset, &mut line, &mut column);
+    return TomlError {
+        kind: kind,
+        line: line,
+        column: column,
+    };
+}
+
+fn append_node(RawVec&mut nodes, TomlNode node) -> bool {
+    i64 index = alloc::vec::len(nodes);
+
+    if (!alloc::vec::reserve(nodes, index + 1)) {
+        return false;
+    }
+    unsafe {
+        *((nodes.data + index * nodes.element_size)as TomlNode*mut) = node;
+    }
+    nodes.length = index + 1;
+    return true;
+}
+
+fn skip_comment(usize data, i64 length, i64&mut cursor) {
+    while (*cursor < length && !is_newline(byte_at(data, *cursor))) {
+        *cursor += 1;
+    }
+}
+
+fn skip_layout(usize data, i64 length, i64&mut cursor) {
+    while (*cursor < length) {
+        i64 byte = byte_at(data, *cursor);
+
+        if (is_space(byte) || is_newline(byte)) {
+            *cursor += 1;
+            continue;
+        }
+        if (byte == 35) {
+            skip_comment(data, length, cursor);
+            continue;
+        }
+        return;
+    }
+}
+
+fn quoted_end(usize data, i64 length, i64 start, i64 quote) -> i64 {
+    if (start + 2 < length && byte_at(data, start + 1) == quote && byte_at(data, start + 2) == quote) {
+        i64 i = start + 3;
+
+        while (i + 2 < length) {
+            if (byte_at(data, i) == quote && byte_at(data, i + 1) == quote && byte_at(data, i + 2) == quote) {
+                return i + 3;
+            }
+            if (quote == 34 && byte_at(data, i) == 92 && i + 1 < length) {
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+        return -1;
+    }
+
+    i64 i = start + 1;
+
+    while (i < length) {
+        i64 byte = byte_at(data, i);
+
+        if (byte == quote) {
+            return i + 1;
+        }
+        if (is_newline(byte)) {
+            return -1;
+        }
+        if (quote == 34 && byte == 92 && i + 1 < length) {
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    return -1;
+}
+
+fn validate_key(usize data, i64 start, i64 end) -> bool {
+    i64 cursor = start;
+    bool expect_part = true;
+
+    while (cursor < end) {
+        while (cursor < end && is_space(byte_at(data, cursor))) {
+            cursor += 1;
+        }
+        if (cursor >= end) {
+            return !expect_part;
+        }
+        if (byte_at(data, cursor) == 34 || byte_at(data, cursor) == 39) {
+            i64 quoted = quoted_end(data, end, cursor, byte_at(data, cursor));
+
+            if (quoted < 0 || quoted > end) {
+                return false;
+            }
+            cursor = quoted;
+        } else {
+            i64 part_start = cursor;
+
+            while (cursor < end && is_bare_key(byte_at(data, cursor))) {
+                cursor += 1;
+            }
+            if (cursor == part_start) {
+                return false;
+            }
+        }
+        expect_part = false;
+        while (cursor < end && is_space(byte_at(data, cursor))) {
+            cursor += 1;
+        }
+        if (cursor == end) {
+            return true;
+        }
+        if (byte_at(data, cursor) != 46) {
+            return false;
+        }
+        cursor += 1;
+        expect_part = true;
+    }
+    return !expect_part;
+}
+
+fn scan_composite(usize data, i64 length, i64 start, i64 opener, i64 closer, i64 max_depth) -> i64 {
+    i64 cursor = start;
+    i64 array_depth = 0;
+    i64 table_depth = 0;
+
+    while (cursor < length) {
+        i64 byte = byte_at(data, cursor);
+
+        if (byte == 34 || byte == 39) {
+            i64 end = quoted_end(data, length, cursor, byte);
+
+            if (end < 0) {
+                return -1;
+            }
+            cursor = end;
+            continue;
+        }
+        if (byte == 35 && table_depth == 0) {
+            skip_comment(data, length, &mut cursor);
+            continue;
+        }
+        if (byte == 91) {
+            array_depth += 1;
+        } else if (byte == 93) {
+            array_depth -= 1;
+            if (array_depth < 0) {
+                return -1;
+            }
+        } else if (byte == 123) {
+            table_depth += 1;
+        } else if (byte == 125) {
+            table_depth -= 1;
+            if (table_depth < 0) {
+                return -1;
+            }
+        }
+        if (array_depth + table_depth > max_depth) {
+            return -2;
+        }
+        if (opener == 91 && array_depth == 0 && table_depth == 0) {
+            return cursor + 1;
+        }
+        if (opener == 123 && table_depth == 0 && array_depth == 0) {
+            return cursor + 1;
+        }
+        cursor += 1;
+    }
+    return -1;
+}
+
+fn scalar_end(usize data, i64 length, i64 start) -> i64 {
+    i64 cursor = start;
+
+    while (cursor < length) {
+        i64 byte = byte_at(data, cursor);
+
+        if (byte == 35 || is_newline(byte)) {
+            break;
+        }
+        cursor += 1;
+    }
+
+    i64 end = cursor;
+
+    trim_right(data, start, &mut end);
+    return end;
+}
+
+fn bytes_equal_literal(usize data, i64 start, i64 end, usize literal, i64 literal_length) -> bool {
+    if (end - start != literal_length) {
+        return false;
+    }
+
+    i64 i = 0;
+
+    while (i < literal_length) {
+        if (byte_at(data, start + i) != byte_at(literal, i)) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn is_digit(i64 byte) -> bool {
+    return byte >= 48 && byte <= 57;
+}
+
+fn digit_at(usize data, i64 index) -> bool {
+    return is_digit(byte_at(data, index));
+}
+
+fn looks_datetime(usize data, i64 start, i64 end) -> bool {
+    i64 length = end - start;
+
+    if (
+        length >= 10 &&
+        digit_at(data, start) &&
+        digit_at(data, start + 1) &&
+        digit_at(data, start + 2) &&
+        digit_at(data, start + 3) &&
+        byte_at(data, start + 4) == 45 &&
+        digit_at(data, start + 5) &&
+        digit_at(data, start + 6) &&
+        byte_at(data, start + 7) == 45 &&
+        digit_at(data, start + 8) &&
+        digit_at(data, start + 9)
+    ) {
+        return true;
+    }
+    if (
+        length >= 8 &&
+        digit_at(data, start) &&
+        digit_at(data, start + 1) &&
+        byte_at(data, start + 2) == 58 &&
+        digit_at(data, start + 3) &&
+        digit_at(data, start + 4) &&
+        byte_at(data, start + 5) == 58 &&
+        digit_at(data, start + 6) &&
+        digit_at(data, start + 7)
+    ) {
+        return true;
+    }
+    return false;
+}
+
+fn digit_value(i64 byte) -> i64 {
+    if (byte >= 48 && byte <= 57) {
+        return byte - 48;
+    }
+    if (byte >= 65 && byte <= 70) {
+        return byte - 65 + 10;
+    }
+    if (byte >= 97 && byte <= 102) {
+        return byte - 97 + 10;
+    }
+    return -1;
+}
+
+fn valid_digit_run(usize data, i64&mut cursor, i64 end, i64 base) -> bool {
+    bool saw = false;
+    bool underscore = false;
+
+    while (*cursor < end) {
+        i64 byte = byte_at(data, *cursor);
+        i64 value = digit_value(byte);
+
+        if (value >= 0 && value < base) {
+            saw = true;
+            underscore = false;
+            *cursor += 1;
+            continue;
+        }
+        if (byte == 95 && saw && !underscore) {
+            underscore = true;
+            *cursor += 1;
+            continue;
+        }
+        break;
+    }
+    return saw && !underscore;
+}
+
+fn classify_number(usize data, i64 start, i64 end, TomlValueKind&mut kind) -> bool {
+    i64 cursor = start;
+
+    if (cursor < end && (byte_at(data, cursor) == 43 || byte_at(data, cursor) == 45)) {
+        cursor += 1;
+    }
+    if (cursor >= end) {
+        return false;
+    }
+    // Special floating-point values.
+
+    i64 inf[3] = [105, 110, 102];
+    i64 nan[3] = [110, 97, 110];
+
+    if (
+        bytes_equal_literal(data, cursor, end, &inf[0]as usize, 3) ||
+        bytes_equal_literal(data, cursor, end, &nan[0]as usize, 3)
+    ) {
+        *kind = TomlValueKind::Float;
+        return true;
+    }
+    // Non-decimal integers use TOML's 0x / 0o / 0b prefixes.
+    if (cursor + 2 <= end && byte_at(data, cursor) == 48) {
+        i64 marker = byte_at(data, cursor + 1);
+        i64 base = 0;
+
+        if (marker == 120) {
+            base = 16;
+        } else if (marker == 111) {
+            base = 8;
+        } else if (marker == 98) {
+            base = 2;
+        }
+        if (base != 0) {
+            cursor += 2;
+            if (!valid_digit_run(data, &mut cursor, end, base) || cursor != end) {
+                return false;
+            }
+            *kind = TomlValueKind::Integer;
+            return true;
+        }
+    }
+    if (!valid_digit_run(data, &mut cursor, end, 10)) {
+        return false;
+    }
+
+    bool floating = false;
+
+    if (cursor < end && byte_at(data, cursor) == 46) {
+        floating = true;
+        cursor += 1;
+        if (!valid_digit_run(data, &mut cursor, end, 10)) {
+            return false;
+        }
+    }
+    if (cursor < end && (byte_at(data, cursor) == 101 || byte_at(data, cursor) == 69)) {
+        floating = true;
+        cursor += 1;
+        if (cursor < end && (byte_at(data, cursor) == 43 || byte_at(data, cursor) == 45)) {
+            cursor += 1;
+        }
+        if (!valid_digit_run(data, &mut cursor, end, 10)) {
+            return false;
+        }
+    }
+    if (cursor != end) {
+        return false;
+    }
+    *kind = floating?TomlValueKind::Float: TomlValueKind::Integer;
+    return true;
+}
+
+fn classify_scalar(usize data, i64 start, i64 end, TomlValueKind&mut kind) -> bool {
+    if (start >= end) {
+        return false;
+    }
+
+    i64 first = byte_at(data, start);
+
+    if (first == 34 || first == 39) {
+        i64 finish = quoted_end(data, end, start, first);
+
+        if (finish != end) {
+            return false;
+        }
+        *kind = TomlValueKind::String;
+        return true;
+    }
+    // TOML booleans are intentionally case-sensitive.
+
+    i64 true_bytes[4] = [116, 114, 117, 101];
+    i64 false_bytes[5] = [102, 97, 108, 115, 101];
+
+    if (
+        bytes_equal_literal(data, start, end, &true_bytes[0]as usize, 4) ||
+        bytes_equal_literal(data, start, end, &false_bytes[0]as usize, 5)
+    ) {
+        *kind = TomlValueKind::Bool;
+        return true;
+    }
+    if (looks_datetime(data, start, end)) {
+        *kind = TomlValueKind::DateTime;
+        return true;
+    }
+    return classify_number(data, start, end, kind);
+}
+
+fn parse_value_span(
+    usize data,
+    i64 length,
+    i64 start,
+    i64 max_depth,
+    i64&mut end,
+    TomlValueKind&mut kind,
+) -> TomlErrorKind {
+    if (start >= length) {
+        return TomlErrorKind::MissingValue;
+    }
+
+    i64 first = byte_at(data, start);
+
+    if (first == 91) {
+        i64 finish = scan_composite(data, length, start, 91, 93, max_depth);
+
+        if (finish == -2) {
+            return TomlErrorKind::DepthExceeded;
+        }
+        if (finish < 0) {
+            return TomlErrorKind::UnterminatedArray;
+        }
+        *end = finish;
+        *kind = TomlValueKind::Array;
+        return TomlErrorKind::None;
+    }
+    if (first == 123) {
+        i64 finish = scan_composite(data, length, start, 123, 125, max_depth);
+
+        if (finish == -2) {
+            return TomlErrorKind::DepthExceeded;
+        }
+        if (finish < 0) {
+            return TomlErrorKind::UnterminatedInlineTable;
+        }
+        *end = finish;
+        *kind = TomlValueKind::InlineTable;
+        return TomlErrorKind::None;
+    }
+    if (first == 34 || first == 39) {
+        i64 finish = quoted_end(data, length, start, first);
+
+        if (finish < 0) {
+            return TomlErrorKind::UnterminatedString;
+        }
+        *end = finish;
+        *kind = TomlValueKind::String;
+        return TomlErrorKind::None;
+    }
+
+    i64 finish = scalar_end(data, length, start);
+
+    if (!classify_scalar(data, start, finish, kind)) {
+        return TomlErrorKind::InvalidValue;
+    }
+    *end = finish;
+    return TomlErrorKind::None;
+}
+
+fn parse_table(usize data, i64 length, i64&mut cursor, RawVec&mut nodes) -> TomlError {
+    i64 start = *cursor;
+    bool array_table = start + 1 < length && byte_at(data, start + 1) == 91;
+    i64 open_count = array_table?2: 1;
+    i64 close_count = open_count;
+    i64 key_start = start + open_count;
+    i64 scan = key_start;
+    i64 close_start = -1;
+
+    while (scan < length && !is_newline(byte_at(data, scan))) {
+        i64 byte = byte_at(data, scan);
+
+        if (byte == 34 || byte == 39) {
+            i64 quoted = quoted_end(data, length, scan, byte);
+
+            if (quoted < 0) {
+                return error_at(data, scan, TomlErrorKind::InvalidTable);
+            }
+            scan = quoted;
+            continue;
+        }
+        if (byte == 93) {
+            if (!array_table || (scan + 1 < length && byte_at(data, scan + 1) == 93)) {
+                close_start = scan;
+                break;
+            }
+        }
+        scan += 1;
+    }
+    if (close_start < 0) {
+        return error_at(data, start, TomlErrorKind::InvalidTable);
+    }
+
+    i64 key_end = close_start;
+
+    trim_left(data, &mut key_start, key_end);
+    trim_right(data, key_start, &mut key_end);
+    if (!validate_key(data, key_start, key_end)) {
+        return error_at(data, key_start, TomlErrorKind::InvalidKey);
+    }
+    scan = close_start + close_count;
+    while (scan < length && is_space(byte_at(data, scan))) {
+        scan += 1;
+    }
+    if (scan < length && byte_at(data, scan) == 35) {
+        skip_comment(data, length, &mut scan);
+    }
+    if (scan < length && !is_newline(byte_at(data, scan))) {
+        return error_at(data, scan, TomlErrorKind::InvalidTable);
+    }
+
+    i64 line = 1;
+    i64 column = 1;
+
+    location_for(data, start, &mut line, &mut column);
+    if (!append_node(nodes, TomlNode {
+        kind: array_table?TomlNodeKind::ArrayTable: TomlNodeKind::Table,
+        value_kind: TomlValueKind::String,
+        key_offset: key_start,
+        key_length: key_end - key_start,
+        value_offset: 0,
+        value_length: 0,
+        line: line,
+        column: column,
+    }
+    )) {
+        return error_at(data, start, TomlErrorKind::OutOfMemory);
+    }
+    *cursor = scan;
+    return ok();
+}
+
+fn parse_assignment(usize data, i64 length, i64 max_depth, i64&mut cursor, RawVec&mut nodes) -> TomlError {
+    i64 start = *cursor;
+    i64 scan = start;
+    i64 equals = -1;
+
+    while (scan < length && !is_newline(byte_at(data, scan))) {
+        i64 byte = byte_at(data, scan);
+
+        if (byte == 34 || byte == 39) {
+            i64 quoted = quoted_end(data, length, scan, byte);
+
+            if (quoted < 0) {
+                return error_at(data, scan, TomlErrorKind::InvalidKey);
+            }
+            scan = quoted;
+            continue;
+        }
+        if (byte == 61) {
+            equals = scan;
+            break;
+        }
+        if (byte == 35) {
+            break;
+        }
+        scan += 1;
+    }
+    if (equals < 0) {
+        return error_at(data, start, TomlErrorKind::MissingEquals);
+    }
+
+    i64 key_start = start;
+    i64 key_end = equals;
+
+    trim_left(data, &mut key_start, key_end);
+    trim_right(data, key_start, &mut key_end);
+    if (!validate_key(data, key_start, key_end)) {
+        return error_at(data, key_start, TomlErrorKind::InvalidKey);
+    }
+
+    i64 value_start = equals + 1;
+
+    trim_left(data, &mut value_start, length);
+    if (value_start >= length || is_newline(byte_at(data, value_start)) || byte_at(data, value_start) == 35) {
+        return error_at(data, value_start, TomlErrorKind::MissingValue);
+    }
+
+    i64 value_end = value_start;
+    TomlValueKind value_kind = TomlValueKind::String;
+
+    TomlErrorKind value_error = parse_value_span(
+        data,
+        length,
+        value_start,
+        max_depth,
+        &mut value_end,
+        &mut value_kind,
+    );
+    if (value_error != TomlErrorKind::None) {
+        return error_at(data, value_start, value_error);
+    }
+    scan = value_end;
+    while (scan < length && is_space(byte_at(data, scan))) {
+        scan += 1;
+    }
+    if (scan < length && byte_at(data, scan) == 35) {
+        skip_comment(data, length, &mut scan);
+    }
+    if (scan < length && !is_newline(byte_at(data, scan))) {
+        return error_at(data, scan, TomlErrorKind::InvalidValue);
+    }
+
+    i64 line = 1;
+    i64 column = 1;
+
+    location_for(data, start, &mut line, &mut column);
+    if (!append_node(nodes, TomlNode {
+        kind: TomlNodeKind::KeyValue,
+        value_kind: value_kind,
+        key_offset: key_start,
+        key_length: key_end - key_start,
+        value_offset: value_start,
+        value_length: value_end - value_start,
+        line: line,
+        column: column,
+    }
+    )) {
+        return error_at(data, start, TomlErrorKind::OutOfMemory);
+    }
+    *cursor = scan;
+    return ok();
+}
+
+fn parse_into(usize data, i64 length, i64 max_depth, RawVec&mut nodes) -> TomlError {
+    if (length < 0 || max_depth <= 0 || (data == 0 && length != 0)) {
+        return TomlError {
+            kind: TomlErrorKind::InvalidValue,
+            line: 1,
+            column: 1,
+        };
+    }
+
+    i64 cursor = 0;
+
+    while (cursor < length) {
+        skip_layout(data, length, &mut cursor);
+        if (cursor >= length) {
+            break;
+        }
+
+        TomlError result = ok();
+
+        if (byte_at(data, cursor) == 91) {
+            result = parse_table(data, length, &mut cursor, nodes);
+        } else {
+            result = parse_assignment(data, length, max_depth, &mut cursor, nodes);
+        }
+        if (!success(&result)) {
+            return result;
+        }
+    }
+    return ok();
+}
+
+/// Parse caller-owned TOML bytes without copying the source. The input must
+/// outlive the document.
+public fn parse_borrowed(usize data, i64 length, i64 max_depth, TomlDocument&mut output) -> TomlError {
+    TomlDocument document = empty();
+
+    document.borrowed_source = data;
+    document.borrowed_length = length;
+    document.borrowed = true;
+
+    TomlError result = parse_into(data, length, max_depth, &mut document.nodes);
+
+    if (!success(&result)) {
+        destroy(&mut document);
+        return result;
+    }
+    destroy(output);
+    *output = move document;
+    return result;
+}
+
+/// Parse TOML into a document that owns its source bytes.
+public fn parse_owned(String source, i64 max_depth, TomlDocument&mut output) -> TomlError {
+    TomlDocument document = empty();
+
+    document.source = move source;
+    document.borrowed = false;
+    TomlError result = parse_into(
+        alloc::string::data_ptr(&document.source),
+        alloc::string::len(&document.source),
+        max_depth,
+        &mut document.nodes,
+    );
+    if (!success(&result)) {
+        destroy(&mut document);
+        return result;
+    }
+    destroy(output);
+    *output = move document;
+    return result;
+}

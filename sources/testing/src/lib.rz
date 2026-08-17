@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace testing;
+
 // Public package surface. Implementations are added behind this facade as the package matures.
 public fn version_major() -> i64 {
     return 0;

@@ -1,0 +1,20 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import core::result;
+import http_router;
+
+fn main() -> i64 {
+    Route routes[32];
+    Segment segments[128];
+    Router router = http_router::router::init(routes as usize, 32, segments as usize, 128);
+    u8 pattern[10] = [47, 117, 115, 101, 114, 115, 47, 58, 105, 100];
+
+    match http_router::router::add(&mut router, Method::Get, pattern as usize, 10, 100, -1) {
+        Result<i64, RouterError>::Error(_) => {
+            return 1;
+        }
+        Result<i64, RouterError>::Ok(_) => {}
+    }
+    return 0;
+}

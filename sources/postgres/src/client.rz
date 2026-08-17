@@ -1,0 +1,306 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace postgres::client;
+import core::result;
+import std::net;
+import postgres::wire;
+import postgres::auth;
+
+public enum ClientError {
+    Connect,
+    Send,
+    Receive,
+    Protocol,
+    Authentication,
+    OutputFull,
+    NotConnected
+}
+
+public enum State {
+    Disconnected,
+    Startup,
+    Authenticating,
+    Ready,
+    Querying,
+    Failed
+}
+
+public struct Client {
+    i64 socket;
+    State state;
+    i64 backend_pid;
+    i64 backend_secret;
+    u8 transaction_status;
+}
+
+public fn empty() -> Client {
+    return Client {
+        socket: -1,
+        state: State::Disconnected,
+        backend_pid: 0,
+        backend_secret: 0,
+        transaction_status: 73
+    };
+}
+
+public fn connected(Client& c) -> bool {
+    return c.socket >= 0;
+}
+
+public fn close(Client&mut c) {
+    if (c.socket >= 0) {
+        u8 term[5];
+        auto n = wire::write_terminate(&term, 5);
+
+        if (n.is_ok()) {
+            std::net::send_all(c.socket, &term, n.unwrap());
+        }
+        std::net::close(c.socket);
+    }
+    c.socket = -1;
+    c.state = State::Disconnected;
+}
+
+public fn connect_tcp(Client&mut c, usize host, i64 host_length, i64 port) -> Result<bool, ClientError> {
+    i64 s = std::net::connect(host, host_length, port);
+
+    if (s<0) {
+        return Result<bool, ClientError>::Error(ClientError::Connect);
+    }
+    c.socket = s;
+    c.state = State::Startup;
+    return Result<bool, ClientError>::Ok(true);
+}
+
+public fn send_startup(
+    Client&mut c,
+    usize buffer,
+    i64 capacity,
+    usize user,
+    i64 user_len,
+    usize database,
+    i64 db_len,
+    usize app,
+    i64 app_len,
+) -> Result<bool, ClientError> {
+    if (c.socket<0) {
+        return Result<bool, ClientError>::Error(ClientError::NotConnected);
+    }
+
+    auto n = wire::write_startup(buffer, capacity, user, user_len, database, db_len, app, app_len);
+
+    if (n.is_error()) {
+        return Result<bool, ClientError>::Error(ClientError::OutputFull);
+    }
+    if (std::net::send_all(c.socket, buffer, n.unwrap()) != n.unwrap()) {
+        return Result<bool, ClientError>::Error(ClientError::Send);
+    }
+    c.state = State::Authenticating;
+    return Result<bool, ClientError>::Ok(true);
+}
+
+public fn simple_query(
+    Client&mut c,
+    usize buffer,
+    i64 capacity,
+    usize sql,
+    i64 sql_length,
+) -> Result<bool, ClientError> {
+    if (c.state != State::Ready) {
+        return Result<bool, ClientError>::Error(ClientError::NotConnected);
+    }
+
+    auto n = wire::write_query(buffer, capacity, sql, sql_length);
+
+    if (n.is_error()) {
+        return Result<bool, ClientError>::Error(ClientError::OutputFull);
+    }
+
+    i64 count = n.unwrap();
+
+    if (std::net::send_all(c.socket, buffer, count) != count) {
+        return Result<bool, ClientError>::Error(ClientError::Send);
+    }
+    c.state = State::Querying;
+    return Result<bool, ClientError>::Ok(true);
+}
+
+/// Applies connection-level protocol messages that affect client state. Row/description
+/// messages remain caller-owned and are decoded through postgres::wire.
+public fn apply(Client&mut c, wire::MessageView& message) -> Result<bool, ClientError> {
+    i64 tag = message.tag as i64;
+
+    if (tag == 82) {
+        auto req = auth::parse(message.payload, message.payload_length);
+
+        if (req.is_error()) {
+            c.state = State::Failed;
+            return Result<bool, ClientError>::Error(ClientError::Authentication);
+        }
+        if (req.unwrap().kind == auth::AuthKind::Ok) {
+            c.state = State::Authenticating;
+        }
+        return Result<bool, ClientError>::Ok(true);
+    }
+    if (tag == 75) {
+        if (message.payload_length != 8) {
+            return Result<bool, ClientError>::Error(ClientError::Protocol);
+        }
+        c.backend_pid = wire::read_i32_be(message.payload);
+        c.backend_secret = wire::read_i32_be(message.payload + 4);
+        return Result<bool, ClientError>::Ok(true);
+    }
+    if (tag == 90) {
+        if (message.payload_length != 1) {
+            return Result<bool, ClientError>::Error(ClientError::Protocol);
+        }
+        unsafe {
+            c.transaction_status = *((message.payload)as u8*const);
+        }
+        c.state = State::Ready;
+        return Result<bool, ClientError>::Ok(true);
+    }
+    if (tag == 69) {
+        c.state = State::Failed;
+        return Result<bool, ClientError>::Error(ClientError::Protocol);
+    }
+    return Result<bool, ClientError>::Ok(false);
+}
+
+fn literal_query(
+    Client&mut c,
+    usize buffer,
+    i64 capacity,
+    usize sql,
+    i64 length,
+) -> Result<bool, ClientError> {
+    return simple_query(c, buffer, capacity, sql, length);
+}
+
+public fn begin(Client&mut c, usize buffer, i64 capacity) -> Result<bool, ClientError> {
+    u8 sql[5] = [66, 69, 71, 73, 78];
+
+    return literal_query(c, buffer, capacity, &sql[0]as usize, 5);
+}
+
+public fn commit(Client&mut c, usize buffer, i64 capacity) -> Result<bool, ClientError> {
+    u8 sql[6] = [67, 79, 77, 77, 73, 84];
+
+    return literal_query(c, buffer, capacity, &sql[0]as usize, 6);
+}
+
+public fn rollback(Client&mut c, usize buffer, i64 capacity) -> Result<bool, ClientError> {
+    u8 sql[8] = [82, 79, 76, 76, 66, 65, 67, 75];
+
+    return literal_query(c, buffer, capacity, &sql[0]as usize, 8);
+}
+
+/// Handles one PostgreSQL authentication message over the blocking TCP transport.
+/// SCRAM state must be retained by the caller across SASL / Continue / Final messages.
+public fn handle_auth_tcp(
+    Client&mut c,
+    auth::ScramClient&mut scram,
+    wire::MessageView& message,
+    usize user,
+    i64 user_length,
+    usize password,
+    i64 password_length,
+    usize output,
+    i64 output_capacity,
+) -> Result<bool, ClientError> {
+    if (message.tag != 82 || c.socket < 0) {
+        return Result<bool, ClientError>::Error(ClientError::Protocol);
+    }
+
+    auto parsed = auth::parse(message.payload, message.payload_length);
+
+    if (parsed.is_error()) {
+        return Result<bool, ClientError>::Error(ClientError::Authentication);
+    }
+
+    auto request = parsed.unwrap();
+
+    if (request.kind == auth::AuthKind::Ok) {
+        return Result<bool, ClientError>::Ok(true);
+    }
+    if (request.kind == auth::AuthKind::CleartextPassword) {
+        auto frame = wire::write_password(output, output_capacity, password, password_length);
+
+        if (frame.is_error()) {
+            return Result<bool, ClientError>::Error(ClientError::OutputFull);
+        }
+        if (std::net::send_all(c.socket, output, frame.unwrap()) != frame.unwrap()) {
+            return Result<bool, ClientError>::Error(ClientError::Send);
+        }
+        return Result<bool, ClientError>::Ok(false);
+    }
+    if (request.kind == auth::AuthKind::Sasl) {
+        if (!auth::supports_scram_sha256(&request)) {
+            return Result<bool, ClientError>::Error(ClientError::Authentication);
+        }
+
+        u8 initial[768];
+        auto initial_length = auth::scram_begin(scram, user, user_length, initial as usize, 768);
+
+        if (initial_length.is_error()) {
+            return Result<bool, ClientError>::Error(ClientError::Authentication);
+        }
+
+        u8 mechanism[13] = [83, 67, 82, 65, 77, 45, 83, 72, 65, 45, 50, 53, 54];
+
+        auto frame = wire::write_sasl_initial(
+            output,
+            output_capacity,
+            mechanism as usize,
+            13,
+            initial as usize,
+            initial_length.unwrap(),
+        );
+        if (frame.is_error()) {
+            return Result<bool, ClientError>::Error(ClientError::OutputFull);
+        }
+        if (std::net::send_all(c.socket, output, frame.unwrap()) != frame.unwrap()) {
+            return Result<bool, ClientError>::Error(ClientError::Send);
+        }
+        return Result<bool, ClientError>::Ok(false);
+    }
+    if (request.kind == auth::AuthKind::SaslContinue) {
+        u8 final_message[1024];
+
+        auto final_length = auth::scram_continue(
+            scram,
+            password,
+            password_length,
+            request.data,
+            request.length,
+            final_message as usize,
+            1024,
+        );
+        if (final_length.is_error()) {
+            return Result<bool, ClientError>::Error(ClientError::Authentication);
+        }
+        auto frame = wire::write_sasl_response(
+            output,
+            output_capacity,
+            final_message as usize,
+            final_length.unwrap(),
+        );
+        if (frame.is_error()) {
+            return Result<bool, ClientError>::Error(ClientError::OutputFull);
+        }
+        if (std::net::send_all(c.socket, output, frame.unwrap()) != frame.unwrap()) {
+            return Result<bool, ClientError>::Error(ClientError::Send);
+        }
+        return Result<bool, ClientError>::Ok(false);
+    }
+    if (request.kind == auth::AuthKind::SaslFinal) {
+        auto verified = auth::scram_verify_final(scram, request.data, request.length);
+
+        if (verified.is_error()) {
+            return Result<bool, ClientError>::Error(ClientError::Authentication);
+        }
+        return Result<bool, ClientError>::Ok(false);
+    }
+    return Result<bool, ClientError>::Error(ClientError::Authentication);
+}

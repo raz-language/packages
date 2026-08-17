@@ -1,0 +1,609 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace postgres::auth;
+import core::result;
+import crypto::hash::sha256;
+import crypto::mac::hmac;
+import crypto::secure;
+import std::encoding::base64;
+import postgres::wire;
+
+public enum AuthKind {
+    Ok,
+    CleartextPassword,
+    Md5Password,
+    Sasl,
+    SaslContinue,
+    SaslFinal,
+    Unsupported
+}
+
+public enum AuthError {
+    InvalidMessage,
+    OutputFull,
+    InvalidIterations,
+    CryptoFailure
+}
+
+public struct AuthRequest {
+    AuthKind kind;
+    usize data;
+    i64 length;
+    i64 code;
+}
+
+public fn parse(usize payload, i64 length) -> Result<AuthRequest, AuthError> {
+    if (payload == 0 || length<4) {
+        return Result<AuthRequest, AuthError>::Error(AuthError::InvalidMessage);
+    }
+
+    i64 code = postgres::wire::read_i32_be(payload);
+    AuthKind kind = AuthKind::Unsupported;
+
+    if (code == 0) {
+        kind = AuthKind::Ok;
+    } else if (code == 3) {
+        kind = AuthKind::CleartextPassword;
+    } else if (code == 5) {
+        kind = AuthKind::Md5Password;
+    } else if (code == 10) {
+        kind = AuthKind::Sasl;
+    } else if (code == 11) {
+        kind = AuthKind::SaslContinue;
+    } else if (code == 12) {
+        kind = AuthKind::SaslFinal;
+    }
+    return Result<AuthRequest, AuthError>::Ok(AuthRequest {
+        kind: kind, data: payload + 4, length: length - 4, code: code
+    }
+    );
+}
+
+/// SCRAM Hi() = PBKDF2-HMAC-SHA-256(password, salt, iterations, 32).
+public fn scram_hi(
+    usize password,
+    i64 password_length,
+    usize salt,
+    i64 salt_length,
+    i64 iterations,
+    usize output,
+) -> Result<bool, AuthError> {
+    if (iterations <= 0 || output == 0) {
+        return Result<bool, AuthError>::Error(AuthError::InvalidIterations);
+    }
+
+    u8 block[1024];
+
+    if (salt_length<0 || salt_length + 4> 1024) {
+        return Result<bool, AuthError>::Error(AuthError::OutputFull);
+    }
+
+    i64 i = 0;
+
+    while (i<salt_length) {
+        unsafe {
+            block[i] = *((salt + i)as u8*const);
+        }
+        i += 1;
+    }
+    block[salt_length] = 0;
+    block[salt_length + 1] = 0;
+    block[salt_length + 2] = 0;
+    block[salt_length + 3] = 1;
+
+    u8 u[32];
+    u8 acc[32];
+
+    if (!hmac::sha256(password, password_length, &block[0]as usize, salt_length + 4, &mut u[0]as usize)) {
+        return Result<bool, AuthError>::Error(AuthError::CryptoFailure);
+    }
+    i = 0;
+    while (i<32) {
+        acc[i] = u[i];
+        i += 1;
+    }
+
+    i64 round = 1;
+
+    while (round<iterations) {
+        if (!hmac::sha256(password, password_length, &u[0]as usize, 32, &mut u[0]as usize)) {
+            return Result<bool, AuthError>::Error(AuthError::CryptoFailure);
+        }
+        i = 0;
+        while (i<32) {
+            acc[i] = acc[i] ^ u[i];
+            i += 1;
+        }
+        round += 1;
+    }
+    i = 0;
+    while (i<32) {
+        unsafe {
+            *((output + i)as u8*mut) = acc[i];
+        }
+        i += 1;
+    }
+    return Result<bool, AuthError>::Ok(true);
+}
+
+public fn client_key(usize salted_password, usize output) -> bool {
+    u8 k[9] = [67, 108, 105, 101, 110, 116, 32, 75, 101];
+
+    return hmac::sha256(salted_password, 32, &k[0]as usize, 9, output);
+}
+
+public fn server_key(usize salted_password, usize output) -> bool {
+    u8 k[9] = [83, 101, 114, 118, 101, 114, 32, 75, 101];
+
+    return hmac::sha256(salted_password, 32, &k[0]as usize, 9, output);
+}
+
+public fn stored_key(usize client_key_bytes, usize output) -> bool {
+    return sha256::digest(client_key_bytes, 32, output);
+}
+
+public fn xor32(usize left, usize right, usize output) {
+    i64 i = 0;
+
+    while (i<32) {
+        unsafe {
+            *((output + i)as u8*mut) = (*((left + i)as u8*const)) ^ (*((right + i)as u8*const));
+        }
+        i += 1;
+    }
+}
+
+public enum ScramError {
+    InvalidState, InvalidInput, InvalidServerMessage, UnsupportedMechanism, NonceMismatch, InvalidSalt, InvalidProof, OutputFull, CryptoFailure
+}
+
+public struct ScramClient {
+    u8 nonce[24];
+    i64 nonce_length;
+    u8 client_first_bare[384];
+    i64 client_first_bare_length;
+    u8 server_first[768];
+    i64 server_first_length;
+    u8 client_final_without_proof[768];
+    i64 client_final_without_proof_length;
+    u8 server_signature[32];
+    bool proof_ready;
+}
+
+fn byte_at(usize p, i64 index) -> i64 {
+    unsafe {
+        return (*((p + index)as u8*const))as i64;
+    }
+}
+
+fn put(usize output, i64 capacity, i64 offset, i64 value) -> i64 {
+    if (output == 0 || offset < 0 || offset >= capacity) {
+        return -1;
+    }
+    unsafe {
+        *((output + offset)as u8*mut) = value as u8;
+    }
+    return offset + 1;
+}
+
+fn append_bytes(usize output, i64 capacity, i64 offset, usize input, i64 length) -> i64 {
+    if (length < 0 || offset < 0 || offset + length> capacity || (length> 0 && input == 0)) {
+        return -1;
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        unsafe {
+            *((output + offset + i)as u8*mut) = *((input + i)as u8*const);
+        }
+        i += 1;
+    }
+    return offset + length;
+}
+
+fn attribute(usize message, i64 length, i64 key) -> BytesView {
+    i64 start = 0;
+
+    while (start < length) {
+        i64 end = start;
+
+        while (end < length && byte_at(message, end) != 44) {
+            end += 1;
+        }
+        if (end - start >= 2 && byte_at(message, start) == key && byte_at(message, start + 1) == 61) {
+            return BytesView {
+                data: message + start + 2, length: end - start - 2
+            };
+        }
+        start = end + 1;
+    }
+    return BytesView {
+        data: 0, length: 0
+    };
+}
+
+fn parse_positive_i64(BytesView value) -> i64 {
+    if (value.data == 0 || value.length <= 0) {
+        return -1;
+    }
+
+    i64 result = 0;
+    i64 i = 0;
+
+    while (i < value.length) {
+        i64 d = byte_at(value.data, i) - 48;
+
+        if (d < 0 || d> 9 || result>(i64::MAX - d) / 10) {
+            return -1;
+        }
+        result = result * 10 + d;
+        i += 1;
+    }
+    return result;
+}
+
+fn starts_with(BytesView value, usize prefix, i64 prefix_length) -> bool {
+    if (value.length < prefix_length || prefix_length < 0) {
+        return false;
+    }
+
+    i64 i = 0;
+
+    while (i < prefix_length) {
+        if (byte_at(value.data, i) != byte_at(prefix, i)) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+/// Creates the SCRAM client-first-message (`n,,` + client-first-bare).
+/// Usernames are escaped according to RFC 5802 (`=` => `=3D`, `,` => `=2C`).
+public fn scram_begin(
+    ScramClient&mut client,
+    usize user,
+    i64 user_length,
+    usize output,
+    i64 output_capacity,
+) -> Result<i64, ScramError> {
+    if (user == 0 || user_length <= 0 || output == 0) {
+        return Result<i64, ScramError>::Error(ScramError::InvalidInput);
+    }
+
+    u8 entropy[18];
+
+    if (!crypto::secure::random_fill(&mut entropy[0]as usize, 18)) {
+        return Result<i64, ScramError>::Error(ScramError::CryptoFailure);
+    }
+
+    auto encoded = std::encoding::base64::encode(&entropy[0]as usize, 18, &mut client.nonce[0]as usize, 24);
+
+    if (encoded.is_error()) {
+        return Result<i64, ScramError>::Error(ScramError::CryptoFailure);
+    }
+    client.nonce_length = encoded.unwrap();
+
+    i64 c = 0;
+
+    c = put(&mut client.client_first_bare[0]as usize, 384, c, 110);
+    // n
+    c = put(&mut client.client_first_bare[0]as usize, 384, c, 61);
+    // =
+    if (c < 0) {
+        return Result<i64, ScramError>::Error(ScramError::OutputFull);
+    }
+
+    i64 i = 0;
+
+    while (i < user_length) {
+        i64 b = byte_at(user, i);
+
+        if (b == 61) {
+            c = put(&mut client.client_first_bare[0]as usize, 384, c, 61);
+            c = put(&mut client.client_first_bare[0]as usize, 384, c, 51);
+            c = put(&mut client.client_first_bare[0]as usize, 384, c, 68);
+        } else if (b == 44) {
+            c = put(&mut client.client_first_bare[0]as usize, 384, c, 61);
+            c = put(&mut client.client_first_bare[0]as usize, 384, c, 50);
+            c = put(&mut client.client_first_bare[0]as usize, 384, c, 67);
+        } else {
+            c = put(&mut client.client_first_bare[0]as usize, 384, c, b);
+        }
+        if (c < 0) {
+            return Result<i64, ScramError>::Error(ScramError::OutputFull);
+        }
+        i += 1;
+    }
+    c = put(&mut client.client_first_bare[0]as usize, 384, c, 44);
+    // ,
+    c = put(&mut client.client_first_bare[0]as usize, 384, c, 114);
+    // r
+    c = put(&mut client.client_first_bare[0]as usize, 384, c, 61);
+    // =
+    c = append_bytes(
+        &mut client.client_first_bare[0]as usize,
+        384,
+        c,
+        &client.nonce[0]as usize,
+        client.nonce_length,
+    );
+    if (c < 0) {
+        return Result<i64, ScramError>::Error(ScramError::OutputFull);
+    }
+    client.client_first_bare_length = c;
+    client.proof_ready = false;
+
+    i64 out = 0;
+
+    out = put(output, output_capacity, out, 110);
+    out = put(output, output_capacity, out, 44);
+    out = put(output, output_capacity, out, 44);
+    out = append_bytes(output, output_capacity, out, &client.client_first_bare[0]as usize, c);
+    if (out < 0) {
+        return Result<i64, ScramError>::Error(ScramError::OutputFull);
+    }
+    return Result<i64, ScramError>::Ok(out);
+}
+
+/// Consumes the server-first-message and builds client-final-message with proof.
+public fn scram_continue(
+    ScramClient&mut client,
+    usize password,
+    i64 password_length,
+    usize server_first,
+    i64 server_first_length,
+    usize output,
+    i64 output_capacity,
+) -> Result<i64, ScramError> {
+    if (
+        client.client_first_bare_length <= 0 ||
+        password_length < 0 ||
+        server_first == 0 ||
+        server_first_length <= 0
+    ) {
+        return Result<i64, ScramError>::Error(ScramError::InvalidState);
+    }
+    if (server_first_length> 768) {
+        return Result<i64, ScramError>::Error(ScramError::OutputFull);
+    }
+
+    i64 copied = append_bytes(&mut client.server_first[0]as usize, 768, 0, server_first, server_first_length);
+
+    if (copied < 0) {
+        return Result<i64, ScramError>::Error(ScramError::OutputFull);
+    }
+    client.server_first_length = copied;
+
+    BytesView nonce = attribute(server_first, server_first_length, 114);
+
+    // r
+
+    BytesView salt64 = attribute(server_first, server_first_length, 115);
+
+    // s
+
+    BytesView iteration_text = attribute(server_first, server_first_length, 105);
+
+    // i
+    if (nonce.data == 0 || salt64.data == 0 || iteration_text.data == 0) {
+        return Result<i64, ScramError>::Error(ScramError::InvalidServerMessage);
+    }
+    if (
+        !starts_with(nonce, &client.nonce[0]as usize, client.nonce_length) ||
+        nonce.length <= client.nonce_length
+    ) {
+        return Result<i64, ScramError>::Error(ScramError::NonceMismatch);
+    }
+
+    i64 iterations = parse_positive_i64(iteration_text);
+
+    if (iterations <= 0) {
+        return Result<i64, ScramError>::Error(ScramError::InvalidServerMessage);
+    }
+
+    u8 salt[256];
+    auto decoded = std::encoding::base64::decode(salt64.data, salt64.length, &mut salt[0]as usize, 256);
+
+    if (decoded.is_error()) {
+        return Result<i64, ScramError>::Error(ScramError::InvalidSalt);
+    }
+
+    u8 salted[32];
+
+    auto hi = scram_hi(
+        password,
+        password_length,
+        &salt[0]as usize,
+        decoded.unwrap(),
+        iterations,
+        &mut salted[0]as usize,
+    );
+    if (hi.is_error()) {
+        return Result<i64, ScramError>::Error(ScramError::CryptoFailure);
+    }
+
+    i64 c = 0;
+    u8 channel[7] = [99, 61, 98, 105, 119, 115, 44];
+
+    // c=biws,
+    c = append_bytes(&mut client.client_final_without_proof[0]as usize, 768, c, &channel[0]as usize, 7);
+    c = put(&mut client.client_final_without_proof[0]as usize, 768, c, 114);
+    c = put(&mut client.client_final_without_proof[0]as usize, 768, c, 61);
+    c = append_bytes(&mut client.client_final_without_proof[0]as usize, 768, c, nonce.data, nonce.length);
+    if (c < 0) {
+        return Result<i64, ScramError>::Error(ScramError::OutputFull);
+    }
+    client.client_final_without_proof_length = c;
+
+    u8 client_key_bytes[32];
+    u8 stored[32];
+    u8 client_signature[32];
+    u8 proof[32];
+
+    if (
+        !client_key(&salted[0]as usize, &mut client_key_bytes[0]as usize) ||
+        !stored_key(&client_key_bytes[0]as usize, &mut stored[0]as usize)
+    ) {
+        return Result<i64, ScramError>::Error(ScramError::CryptoFailure);
+    }
+
+    u8 auth_message[2048];
+    i64 auth_length = 0;
+
+    auth_length = append_bytes(
+        &mut auth_message[0]as usize,
+        2048,
+        auth_length,
+        &client.client_first_bare[0]as usize,
+        client.client_first_bare_length,
+    );
+    auth_length = put(&mut auth_message[0]as usize, 2048, auth_length, 44);
+    auth_length = append_bytes(
+        &mut auth_message[0]as usize,
+        2048,
+        auth_length,
+        server_first,
+        server_first_length,
+    );
+    auth_length = put(&mut auth_message[0]as usize, 2048, auth_length, 44);
+    auth_length = append_bytes(
+        &mut auth_message[0]as usize,
+        2048,
+        auth_length,
+        &client.client_final_without_proof[0]as usize,
+        c,
+    );
+    if (
+        auth_length < 0 ||
+        !crypto::mac::hmac::sha256(
+            &stored[0]as usize,
+            32,
+            &auth_message[0]as usize,
+            auth_length,
+            &mut client_signature[0]as usize,
+        )
+    ) {
+        return Result<i64, ScramError>::Error(ScramError::CryptoFailure);
+    }
+    xor32(&client_key_bytes[0]as usize, &client_signature[0]as usize, &mut proof[0]as usize);
+
+    u8 server_key_bytes[32];
+
+    if (
+        !server_key(&salted[0]as usize, &mut server_key_bytes[0]as usize) ||
+        !crypto::mac::hmac::sha256(
+            &server_key_bytes[0]as usize,
+            32,
+            &auth_message[0]as usize,
+            auth_length,
+            &mut client.server_signature[0]as usize,
+        )
+    ) {
+        return Result<i64, ScramError>::Error(ScramError::CryptoFailure);
+    }
+    client.proof_ready = true;
+
+    i64 out = append_bytes(output, output_capacity, 0, &client.client_final_without_proof[0]as usize, c);
+
+    out = put(output, output_capacity, out, 44);
+    out = put(output, output_capacity, out, 112);
+    out = put(output, output_capacity, out, 61);
+    if (out < 0) {
+        return Result<i64, ScramError>::Error(ScramError::OutputFull);
+    }
+
+    auto proof64 = std::encoding::base64::encode(&proof[0]as usize, 32, output + out, output_capacity - out);
+
+    if (proof64.is_error()) {
+        return Result<i64, ScramError>::Error(ScramError::OutputFull);
+    }
+    out += proof64.unwrap();
+    crypto::secure::zeroize(&mut salted[0]as usize, 32);
+    crypto::secure::zeroize(&mut client_key_bytes[0]as usize, 32);
+    crypto::secure::zeroize(&mut server_key_bytes[0]as usize, 32);
+    crypto::secure::zeroize(&mut client_signature[0]as usize, 32);
+    crypto::secure::zeroize(&mut proof[0]as usize, 32);
+    return Result<i64, ScramError>::Ok(out);
+}
+
+/// Verifies `AuthenticationSASLFinal` (`v=<base64-server-signature>`).
+public fn scram_verify_final(
+    ScramClient&mut client,
+    usize final_message,
+    i64 final_length,
+) -> Result<bool, ScramError> {
+    if (!client.proof_ready || final_message == 0 || final_length <= 0) {
+        return Result<bool, ScramError>::Error(ScramError::InvalidState);
+    }
+
+    BytesView error_value = attribute(final_message, final_length, 101);
+
+    // e
+    if (error_value.data != 0) {
+        return Result<bool, ScramError>::Error(ScramError::InvalidServerMessage);
+    }
+
+    BytesView proof64 = attribute(final_message, final_length, 118);
+
+    // v
+    if (proof64.data == 0) {
+        return Result<bool, ScramError>::Error(ScramError::InvalidServerMessage);
+    }
+
+    u8 decoded[64];
+    auto result = std::encoding::base64::decode(proof64.data, proof64.length, &mut decoded[0]as usize, 64);
+
+    if (result.is_error() || result.unwrap() != 32) {
+        return Result<bool, ScramError>::Error(ScramError::InvalidProof);
+    }
+
+    bool valid = crypto::secure::equal(&decoded[0]as usize, &client.server_signature[0]as usize, 32);
+
+    crypto::secure::zeroize(&mut decoded[0]as usize, 64);
+    if (!valid) {
+        return Result<bool, ScramError>::Error(ScramError::InvalidProof);
+    }
+    client.proof_ready = false;
+    return Result<bool, ScramError>::Ok(true);
+}
+
+/// Returns true when AuthenticationSASL advertises SCRAM-SHA-256.
+public fn supports_scram_sha256(AuthRequest& request) -> bool {
+    if (request.kind != AuthKind::Sasl || request.data == 0 || request.length <= 0) {
+        return false;
+    }
+
+    u8 mechanism[13] = [83, 67, 82, 65, 77, 45, 83, 72, 65, 45, 50, 53, 54];
+    i64 c = 0;
+
+    while (c < request.length) {
+        i64 n = 0;
+
+        while (c + n < request.length && byte_at(request.data, c + n) != 0) {
+            n += 1;
+        }
+        if (n == 0) {
+            break;
+        }
+        if (n == 13) {
+            bool equal = true;
+            i64 i = 0;
+
+            while (i < 13) {
+                if (byte_at(request.data + c, i) != mechanism[i]as i64) {
+                    equal = false;
+                    break;
+                }
+                i += 1;
+            }
+            if (equal) {
+                return true;
+            }
+        }
+        c += n + 1;
+    }
+    return false;
+}

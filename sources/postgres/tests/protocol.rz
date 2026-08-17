@@ -1,0 +1,57 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import postgres;
+
+fn main() -> i64 {
+    u8 msg[12] = [68, 0, 0, 0, 11, 0, 1, 0, 0, 0, 1, 52];
+    auto parsed = postgres::wire::parse_message(msg as usize, 12, 1024);
+
+    if (parsed.is_error()) {
+        return 1;
+    }
+
+    MessageView message = parsed.unwrap();
+    FieldView fields[1];
+    auto count = postgres::wire::parse_data_row(&message, fields as usize, 1);
+
+    if (count.is_error() || count.unwrap() != 1) {
+        return 2;
+    }
+
+    auto value = postgres::row::as_i64(&fields[0]);
+
+    if (value.is_error() || value.unwrap() != 4) {
+        return 3;
+    }
+
+    u8 ssl[8];
+    auto ssl_len = postgres::wire::write_ssl_request(ssl as usize, 8);
+
+    if (ssl_len.is_error() || ssl_len.unwrap() != 8) {
+        return 4;
+    }
+    if (!postgres::wire::ssl_response_supported(83) || !postgres::wire::ssl_response_rejected(78)) {
+        return 5;
+    }
+
+    u8 recv_buffer[64];
+    auto receiver = postgres::receive::init(recv_buffer as usize, 64, 1024);
+    i64 i = 0;
+
+    while (i < 12) {
+        recv_buffer[i] = msg[i];
+        i += 1;
+    }
+    receiver.end = 12;
+
+    auto next = postgres::receive::peek(&receiver);
+
+    if (next.is_error() || next.unwrap().tag != 68) {
+        return 6;
+    }
+    if (!postgres::receive::consume(&mut receiver, 12) || postgres::receive::buffered(&receiver) != 0) {
+        return 7;
+    }
+    return 0;
+}

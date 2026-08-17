@@ -1,26 +1,20 @@
 # websocket
 
-WebSocket client and server protocol support for Raz.
+RFC 6455 WebSocket protocol primitives for Raz.
 
-> **Status:** initial package scaffold. The public API is not stable yet.
+`websocket` is designed around caller-owned buffers and nonblocking transports. Frame parsing returns zero-copy payload views; frame headers can be emitted separately from payloads for vectored socket writes and reactor-driven state machines.
 
-## Goals
+## Implemented
 
-- [ ] HTTP upgrade handshake
-- [ ] frame parser/writer
-- [ ] masking
-- [ ] fragmentation
-- [ ] ping/pong/close control frames
-- [ ] client and server helpers
+- RFC 6455 client key generation and `Sec-WebSocket-Accept`
+- frame parsing/writing
+- 7/16/64-bit payload lengths
+- client masking and in-place unmasking
+- continuation/text/binary/close/ping/pong opcodes
+- fragmentation semantics
+- control-frame validation
+- configurable payload limits
+- zero-copy frame payload views
+- allocation-free hot path
 
-## Dependencies
-
-None.
-
-## Design rules
-
-- Native Raz implementation wherever practical.
-- Explicit errors through `Result` for recoverable failures.
-- Avoid hidden allocations on hot paths.
-- Keep the public surface small and composable.
-- Add malformed/adversarial-input tests for parser, protocol, and security code.
+The package intentionally provides protocol/state-machine primitives rather than owning a thread or blocking socket loop, which makes it suitable for Raz's readiness-driven reactor APIs.

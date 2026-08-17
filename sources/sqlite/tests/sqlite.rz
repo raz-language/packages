@@ -1,0 +1,19 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import sqlite;
+
+fn main() -> i64 {
+    auto opened = sqlite::connection::open_memory();
+    if (opened.is_error()) { return 1; }
+    sqlite::connection::Connection db = opened.unwrap();
+    u8 create_sql[38] = [67,82,69,65,84,69,32,84,65,66,76,69,32,116,40,105,100,32,73,78,84,69,71,69,82,44,32,110,97,109,101,32,84,69,88,84,41,59];
+    auto stmt_result = sqlite::connection::prepare(&db, &create_sql[0]as usize, 38);
+    if (stmt_result.is_error()) { sqlite::connection::close(&mut db); return 2; }
+    sqlite::statement::Statement stmt = stmt_result.unwrap();
+    auto step = sqlite::statement::step(&stmt);
+    sqlite::statement::finalize(&mut stmt);
+    sqlite::connection::close(&mut db);
+    if (step.is_error()) { return 3; }
+    return 0;
+}

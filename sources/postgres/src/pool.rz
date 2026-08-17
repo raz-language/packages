@@ -1,0 +1,148 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace postgres::pool;
+import core::result;
+import postgres::client;
+
+public enum PoolError {
+    InvalidStorage,
+    Full,
+    Exhausted,
+    InvalidLease
+}
+
+public struct Slot {
+    client::Client connection;
+    bool occupied;
+    bool leased;
+    u64 generation;
+}
+
+public struct Pool {
+    usize slots;
+    i64 capacity;
+    i64 count;
+    i64 next_probe;
+}
+
+public struct Lease {
+    i64 index;
+    u64 generation;
+}
+
+public fn init(usize slots, i64 capacity) -> Pool {
+    return Pool {
+        slots: slots,
+        capacity: capacity,
+        count: 0,
+        next_probe: 0
+    };
+}
+
+fn slot_at(Pool& pool, i64 index) -> Slot*mut {
+    return (pool.slots + index * (size_of<Slot>()as i64))as Slot*mut;
+}
+
+/// Adds an already-created connection to caller-owned pool storage.
+public fn add(Pool&mut pool, client::Client connection) -> Result<i64, PoolError> {
+    if (pool.slots == 0 || pool.capacity <= 0) {
+        return Result<i64, PoolError>::Error(PoolError::InvalidStorage);
+    }
+
+    i64 i = 0;
+
+    while (i < pool.capacity) {
+        auto slot = slot_at(pool, i);
+
+        unsafe {
+            if (!(*slot).occupied) {
+                (*slot).connection = move connection;
+                (*slot).occupied = true;
+                (*slot).leased = false;
+                (*slot).generation += 1;
+                pool.count += 1;
+                return Result<i64, PoolError>::Ok(i);
+            }
+        }
+        i += 1;
+    }
+    return Result<i64, PoolError>::Error(PoolError::Full);
+}
+
+public fn acquire(Pool&mut pool) -> Result<Lease, PoolError> {
+    if (pool.slots == 0 || pool.capacity <= 0) {
+        return Result<Lease, PoolError>::Error(PoolError::InvalidStorage);
+    }
+
+    i64 scanned = 0;
+
+    while (scanned < pool.capacity) {
+        i64 index = (pool.next_probe + scanned) % pool.capacity;
+        auto slot = slot_at(pool, index);
+
+        unsafe {
+            if ((*slot).occupied && !(*slot).leased && (*slot).connection.state == client::State::Ready) {
+                (*slot).leased = true;
+                pool.next_probe = (index + 1) % pool.capacity;
+                return Result<Lease, PoolError>::Ok(Lease {
+                    index: index,
+                    generation: (*slot).generation
+                }
+                );
+            }
+        }
+        scanned += 1;
+    }
+    return Result<Lease, PoolError>::Error(PoolError::Exhausted);
+}
+
+public fn connection(Pool&mut pool, Lease& lease) -> Result<usize, PoolError> {
+    if (lease.index < 0 || lease.index >= pool.capacity) {
+        return Result<usize, PoolError>::Error(PoolError::InvalidLease);
+    }
+
+    auto slot = slot_at(pool, lease.index);
+
+    unsafe {
+        if (!(*slot).occupied || !(*slot).leased || (*slot).generation != lease.generation) {
+            return Result<usize, PoolError>::Error(PoolError::InvalidLease);
+        }
+        return Result<usize, PoolError>::Ok(&mut(*slot).connection as usize);
+    }
+}
+
+public fn release(Pool&mut pool, Lease lease) -> bool {
+    if (lease.index < 0 || lease.index >= pool.capacity) {
+        return false;
+    }
+
+    auto slot = slot_at(pool, lease.index);
+
+    unsafe {
+        if (!(*slot).occupied || !(*slot).leased || (*slot).generation != lease.generation) {
+            return false;
+        }
+        (*slot).leased = false;
+    }
+    return true;
+}
+
+public fn remove(Pool&mut pool, i64 index) -> bool {
+    if (index < 0 || index >= pool.capacity) {
+        return false;
+    }
+
+    auto slot = slot_at(pool, index);
+
+    unsafe {
+        if (!(*slot).occupied || (*slot).leased) {
+            return false;
+        }
+        client::close(&mut(*slot).connection);
+        (*slot).occupied = false;
+        (*slot).generation += 1;
+        pool.count -= 1;
+    }
+    return true;
+}

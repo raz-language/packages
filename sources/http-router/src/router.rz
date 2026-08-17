@@ -1,0 +1,797 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace http_router::router;
+import core::result;
+
+public enum Method {
+    Any,
+    Get,
+    Head,
+    Post,
+    Put,
+    Patch,
+    Delete,
+    Options,
+    Connect,
+    Trace,
+    Other,
+}
+
+public enum SegmentKind {
+    Static,
+    Parameter,
+    Wildcard,
+}
+
+public enum RouterError {
+    InvalidStorage,
+    RouteCapacity,
+    SegmentCapacity,
+    ParameterCapacity,
+    InvalidPattern,
+    DuplicateParameter,
+    DuplicateRoute,
+    WildcardNotFinal,
+}
+
+public struct Segment {
+    SegmentKind kind;
+    BytesView value;
+    u64 hash;
+}
+
+public struct Route {
+    Method method;
+    BytesView pattern;
+    i64 handler_id;
+    i64 middleware_id;
+    i64 first_segment;
+    i64 segment_count;
+    i64 parameter_count;
+    i64 specificity;
+    u64 first_static_hash;
+    bool root;
+}
+
+/// Caller-owned compiled routing table. `routes` points to Route storage and
+/// `segments` points to Segment storage supplied by the application.
+public struct Router {
+    usize routes;
+    i64 route_capacity;
+    i64 route_count;
+    usize segments;
+    i64 segment_capacity;
+    i64 segment_count;
+}
+
+public struct Param {
+    BytesView name;
+    BytesView value;
+}
+
+public struct Match {
+    bool matched;
+    i64 route_index;
+    i64 handler_id;
+    i64 middleware_id;
+    i64 parameter_count;
+}
+
+fn empty_view() -> BytesView {
+    return BytesView {
+        data: 0,
+        length: 0
+    };
+}
+
+public fn no_match() -> Match {
+    return Match {
+        matched: false,
+        route_index: -1,
+        handler_id: -1,
+        middleware_id: -1,
+        parameter_count: 0,
+    };
+}
+
+public fn init(
+    usize route_storage,
+    i64 route_capacity,
+    usize segment_storage,
+    i64 segment_capacity,
+) -> Router {
+    return Router {
+        routes: route_storage,
+        route_capacity: route_capacity,
+        route_count: 0,
+        segments: segment_storage,
+        segment_capacity: segment_capacity,
+        segment_count: 0,
+    };
+}
+
+public fn clear(Router&mut router) {
+    router.route_count = 0;
+    router.segment_count = 0;
+}
+
+fn route_ptr(Router& router, i64 index) -> Route*mut {
+    unsafe {
+        return (router.routes + index * (size_of<Route>()as i64))as Route*mut;
+    }
+}
+
+fn segment_ptr(Router& router, i64 index) -> Segment*mut {
+    unsafe {
+        return (router.segments + index * (size_of<Segment>()as i64))as Segment*mut;
+    }
+}
+
+fn param_ptr(usize storage, i64 index) -> Param*mut {
+    unsafe {
+        return (storage + index * (size_of<Param>()as i64))as Param*mut;
+    }
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn ascii_upper(i64 value) -> i64 {
+    if (value >= 97 && value <= 122) {
+        return value - 32;
+    }
+    return value;
+}
+
+public fn method_from_bytes(BytesView method) -> Method {
+    if (method.data == 0 || method.length <= 0) {
+        return Method::Other;
+    }
+    if (method.length == 3) {
+        i64 a = ascii_upper(load(method.data));
+        i64 b = ascii_upper(load(method.data + 1));
+        i64 c = ascii_upper(load(method.data + 2));
+
+        if (a == 71 && b == 69 && c == 84) {
+            return Method::Get;
+        }
+        if (a == 80 && b == 85 && c == 84) {
+            return Method::Put;
+        }
+    }
+    if (method.length == 4) {
+        i64 a = ascii_upper(load(method.data));
+        i64 b = ascii_upper(load(method.data + 1));
+        i64 c = ascii_upper(load(method.data + 2));
+        i64 d = ascii_upper(load(method.data + 3));
+
+        if (a == 72 && b == 69 && c == 65 && d == 68) {
+            return Method::Head;
+        }
+        if (a == 80 && b == 79 && c == 83 && d == 84) {
+            return Method::Post;
+        }
+    }
+    if (method.length == 5) {
+        i64 a = ascii_upper(load(method.data));
+        i64 b = ascii_upper(load(method.data + 1));
+        i64 c = ascii_upper(load(method.data + 2));
+        i64 d = ascii_upper(load(method.data + 3));
+        i64 e = ascii_upper(load(method.data + 4));
+
+        if (a == 80 && b == 65 && c == 84 && d == 67 && e == 72) {
+            return Method::Patch;
+        }
+        if (a == 84 && b == 82 && c == 65 && d == 67 && e == 69) {
+            return Method::Trace;
+        }
+    }
+    if (method.length == 6) {
+        if (
+            ascii_upper(load(method.data)) == 68 &&
+            ascii_upper(load(method.data + 1)) == 69 &&
+            ascii_upper(load(method.data + 2)) == 76 &&
+            ascii_upper(load(method.data + 3)) == 69 &&
+            ascii_upper(load(method.data + 4)) == 84 &&
+            ascii_upper(load(method.data + 5)) == 69
+        ) {
+            return Method::Delete;
+        }
+    }
+    if (method.length == 7) {
+        i64 a = ascii_upper(load(method.data));
+        i64 b = ascii_upper(load(method.data + 1));
+        i64 c = ascii_upper(load(method.data + 2));
+        i64 d = ascii_upper(load(method.data + 3));
+        i64 e = ascii_upper(load(method.data + 4));
+        i64 f = ascii_upper(load(method.data + 5));
+        i64 g = ascii_upper(load(method.data + 6));
+
+        if (a == 79 && b == 80 && c == 84 && d == 73 && e == 79 && f == 78 && g == 83) {
+            return Method::Options;
+        }
+        if (a == 67 && b == 79 && c == 78 && d == 78 && e == 69 && f == 67 && g == 84) {
+            return Method::Connect;
+        }
+    }
+    return Method::Other;
+}
+
+fn hash_bytes(usize data, i64 length) -> u64 {
+    u64 hash = 1469598103934665603;
+    i64 index = 0;
+
+    while (index < length) {
+        hash = (hash ^ (load(data + index)as u64)) * 1099511628211;
+        index += 1;
+    }
+    return hash;
+}
+
+fn view_equal(BytesView left, BytesView right) -> bool {
+    if (left.length != right.length) {
+        return false;
+    }
+
+    i64 index = 0;
+
+    while (index < left.length) {
+        if (load(left.data + index) != load(right.data + index)) {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn valid_parameter_name(BytesView name) -> bool {
+    if (name.length <= 0) {
+        return false;
+    }
+
+    i64 index = 0;
+
+    while (index < name.length) {
+        i64 b = load(name.data + index);
+
+        bool valid =
+            (b >= 65 && b <= 90) ||
+            (b >= 97 && b <= 122) ||
+            (b >= 48 && b <= 57) ||
+            b == 95 ||
+            b == 45;
+        if (!valid) {
+            return false;
+        }
+        index += 1;
+    }
+    return true;
+}
+
+fn parameter_name_exists(Router& router, i64 first, i64 count, BytesView name) -> bool {
+    i64 index = 0;
+
+    while (index < count) {
+        auto segment = segment_ptr(router, first + index);
+
+        unsafe {
+            if ((*segment).kind != SegmentKind::Static && view_equal((*segment).value, name)) {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+/// Adds and compiles a route pattern. Pattern bytes are borrowed and must stay
+/// valid for the lifetime of the Router. Syntax: `/users/:id`, `/assets/*path`.
+public fn add(
+    Router&mut router,
+    Method method,
+    usize pattern,
+    i64 pattern_length,
+    i64 handler_id,
+    i64 middleware_id,
+) -> Result<i64, RouterError> {
+    if (
+        router.routes == 0 ||
+        router.segments == 0 ||
+        router.route_capacity <= 0 ||
+        router.segment_capacity <= 0
+    ) {
+        return Result<i64, RouterError>::Error(RouterError::InvalidStorage);
+    }
+    if (router.route_count >= router.route_capacity) {
+        return Result<i64, RouterError>::Error(RouterError::RouteCapacity);
+    }
+    if (pattern == 0 || pattern_length <= 0 || load(pattern) != 47) {
+        return Result<i64, RouterError>::Error(RouterError::InvalidPattern);
+    }
+    BytesView pattern_view = BytesView {
+        data: pattern,
+        length: pattern_length
+    };
+
+    i64 existing_index = 0;
+
+    while (existing_index < router.route_count) {
+        auto existing = route_ptr(router, existing_index);
+
+        unsafe {
+            if ((*existing).method == method && view_equal((*existing).pattern, pattern_view)) {
+                return Result<i64, RouterError>::Error(RouterError::DuplicateRoute);
+            }
+        }
+        existing_index += 1;
+    }
+
+    i64 route_segment_start = router.segment_count;
+    i64 count = 0;
+    i64 parameters = 0;
+    i64 specificity = 0;
+    u64 first_static_hash = 0;
+    bool root = pattern_length == 1;
+    i64 cursor = 1;
+
+    while (cursor < pattern_length) {
+        i64 start = cursor;
+
+        while (cursor < pattern_length && load(pattern + cursor) != 47) {
+            i64 pattern_byte = load(pattern + cursor);
+
+            if (pattern_byte <= 31 || pattern_byte == 35 || pattern_byte == 63) {
+                router.segment_count = route_segment_start;
+                return Result<i64, RouterError>::Error(RouterError::InvalidPattern);
+            }
+            cursor += 1;
+        }
+
+        i64 length = cursor - start;
+
+        if (length <= 0) {
+            router.segment_count = route_segment_start;
+            return Result<i64, RouterError>::Error(RouterError::InvalidPattern);
+        }
+        if (router.segment_count >= router.segment_capacity) {
+            router.segment_count = route_segment_start;
+            return Result<i64, RouterError>::Error(RouterError::SegmentCapacity);
+        }
+
+        SegmentKind kind = SegmentKind::Static;
+
+        BytesView value = BytesView {
+            data: pattern + start,
+            length: length
+        };
+
+        u64 hash = 0;
+        i64 first = load(pattern + start);
+
+        if (first == 58 || first == 42) {
+            value = BytesView {
+                data: pattern + start + 1,
+                length: length - 1
+            };
+            if (!valid_parameter_name(value)) {
+                router.segment_count = route_segment_start;
+                return Result<i64, RouterError>::Error(RouterError::InvalidPattern);
+            }
+            if (parameter_name_exists(router, route_segment_start, count, value)) {
+                router.segment_count = route_segment_start;
+                return Result<i64, RouterError>::Error(RouterError::DuplicateParameter);
+            }
+            if (first == 42) {
+                kind = SegmentKind::Wildcard;
+                if (cursor < pattern_length) {
+                    router.segment_count = route_segment_start;
+                    return Result<i64, RouterError>::Error(RouterError::WildcardNotFinal);
+                }
+                specificity += 1;
+            } else {
+                kind = SegmentKind::Parameter;
+                specificity += 4;
+            }
+            parameters += 1;
+        } else {
+            hash = hash_bytes(value.data, value.length);
+            specificity += 16;
+            if (count == 0) {
+                first_static_hash = hash;
+            }
+        }
+
+        auto output = segment_ptr(router, router.segment_count);
+
+        unsafe {
+            *output = Segment {
+                kind: kind,
+                value: value,
+                hash: hash
+            };
+        }
+        router.segment_count += 1;
+        count += 1;
+        if (cursor < pattern_length) {
+            cursor += 1;
+            if (cursor == pattern_length) {
+                router.segment_count = route_segment_start;
+                return Result<i64, RouterError>::Error(RouterError::InvalidPattern);
+            }
+        }
+    }
+    Route route = Route {
+        method: method,
+        pattern: BytesView {
+            data: pattern,
+            length: pattern_length
+        },
+        handler_id: handler_id,
+        middleware_id: middleware_id,
+        first_segment: route_segment_start,
+        segment_count: count,
+        parameter_count: parameters,
+        specificity: specificity,
+        first_static_hash: first_static_hash,
+        root: root,
+    };
+
+    auto destination = route_ptr(router, router.route_count);
+    i64 route_index = router.route_count;
+
+    unsafe {
+        *destination = route;
+    }
+    router.route_count += 1;
+    return Result<i64, RouterError>::Ok(route_index);
+}
+
+fn path_without_query(BytesView target) -> BytesView {
+    i64 length = target.length;
+    i64 index = 0;
+
+    while (index < target.length) {
+        if (load(target.data + index) == 63) {
+            length = index;
+            break;
+        }
+        index += 1;
+    }
+    return BytesView {
+        data: target.data,
+        length: length
+    };
+}
+
+fn first_path_segment(BytesView path) -> BytesView {
+    if (path.length <= 1 || load(path.data) != 47) {
+        return empty_view();
+    }
+
+    i64 end = 1;
+
+    while (end < path.length && load(path.data + end) != 47) {
+        end += 1;
+    }
+    return BytesView {
+        data: path.data + 1,
+        length: end - 1
+    };
+}
+
+fn method_score(Method route_method, Method request_method) -> i64 {
+    if (route_method == request_method) {
+        return 2;
+    }
+    // HEAD may use a GET route when no more-specific HEAD route wins.
+    if (request_method == Method::Head && route_method == Method::Get) {
+        return 1;
+    }
+    if (route_method == Method::Any) {
+        return 0;
+    }
+    return -1;
+}
+
+fn route_matches(Router& router, Route route, BytesView path) -> bool {
+    if (route.root) {
+        return path.length == 1 && path.data != 0 && load(path.data) == 47;
+    }
+    if (path.length <= 1 || path.data == 0 || load(path.data) != 47) {
+        return false;
+    }
+
+    i64 path_cursor = 1;
+    i64 segment_index = 0;
+
+    while (segment_index < route.segment_count) {
+        auto compiled = segment_ptr(router, route.first_segment + segment_index);
+        i64 start = path_cursor;
+
+        unsafe {
+            if ((*compiled).kind == SegmentKind::Wildcard) {
+                return start <= path.length;
+            }
+        }
+        while (path_cursor < path.length && load(path.data + path_cursor) != 47) {
+            path_cursor += 1;
+        }
+        if (path_cursor == start) {
+            return false;
+        }
+        BytesView actual = BytesView {
+            data: path.data + start,
+            length: path_cursor - start
+        };
+        unsafe {
+            if ((*compiled).kind == SegmentKind::Static) {
+                if (
+                    (*compiled).hash != hash_bytes(actual.data, actual.length) ||
+                    !view_equal((*compiled).value, actual)
+                ) {
+                    return false;
+                }
+            }
+        }
+        segment_index += 1;
+        if (segment_index < route.segment_count) {
+            if (path_cursor >= path.length || load(path.data + path_cursor) != 47) {
+                return false;
+            }
+            path_cursor += 1;
+        }
+    }
+    return path_cursor == path.length;
+}
+
+fn capture_params(
+    Router& router,
+    Route route,
+    BytesView path,
+    usize storage,
+    i64 capacity,
+) -> Result<i64, RouterError> {
+    if (route.parameter_count > capacity) {
+        return Result<i64, RouterError>::Error(RouterError::ParameterCapacity);
+    }
+    if (route.parameter_count > 0 && storage == 0) {
+        return Result<i64, RouterError>::Error(RouterError::InvalidStorage);
+    }
+
+    i64 path_cursor = 1;
+    i64 segment_index = 0;
+    i64 output_index = 0;
+
+    while (segment_index < route.segment_count) {
+        auto compiled = segment_ptr(router, route.first_segment + segment_index);
+        i64 start = path_cursor;
+
+        unsafe {
+            if ((*compiled).kind == SegmentKind::Wildcard) {
+                auto output = param_ptr(storage, output_index);
+
+                *output = Param {
+                    name: (*compiled).value,
+                    value: BytesView {
+                        data: path.data + start,
+                        length: path.length - start
+                    },
+                };
+                output_index += 1;
+                return Result<i64, RouterError>::Ok(output_index);
+            }
+        }
+        while (path_cursor < path.length && load(path.data + path_cursor) != 47) {
+            path_cursor += 1;
+        }
+        unsafe {
+            if ((*compiled).kind == SegmentKind::Parameter) {
+                auto output = param_ptr(storage, output_index);
+
+                *output = Param {
+                    name: (*compiled).value,
+                    value: BytesView {
+                        data: path.data + start,
+                        length: path_cursor - start
+                    },
+                };
+                output_index += 1;
+            }
+        }
+        segment_index += 1;
+        if (segment_index < route.segment_count && path_cursor < path.length) {
+            path_cursor += 1;
+        }
+    }
+    return Result<i64, RouterError>::Ok(output_index);
+}
+
+/// Matches an HTTP target. Query bytes are ignored for route selection. The
+/// highest-specificity route wins; equal specificity preserves registration
+/// order. `params` receives borrowed views into the request target.
+public fn resolve(
+    Router& router,
+    Method method,
+    BytesView target,
+    usize params,
+    i64 param_capacity,
+) -> Result<Match, RouterError> {
+    BytesView path = path_without_query(target);
+
+    if (path.length <= 0 || path.data == 0 || load(path.data) != 47) {
+        return Result<Match, RouterError>::Ok(no_match());
+    }
+
+    BytesView first = first_path_segment(path);
+    u64 first_hash = 0;
+
+    if (first.length > 0) {
+        first_hash = hash_bytes(first.data, first.length);
+    }
+
+    i64 best_index = -1;
+    i64 best_specificity = -1;
+    i64 index = 0;
+
+    while (index < router.route_count) {
+        auto candidate = route_ptr(router, index);
+
+        unsafe {
+            i64 method_rank = method_score((*candidate).method, method);
+
+            if (method_rank >= 0) {
+                bool first_possible =
+                    (*candidate).first_static_hash == 0 ||
+                    (*candidate).first_static_hash == first_hash;
+                i64 candidate_specificity = (*candidate).specificity * 4 + method_rank;
+
+                if (
+                    first_possible &&
+                    candidate_specificity > best_specificity &&
+                    route_matches(router, *candidate, path)
+                ) {
+                    best_index = index;
+                    best_specificity = candidate_specificity;
+                }
+            }
+        }
+        index += 1;
+    }
+    if (best_index < 0) {
+        return Result<Match, RouterError>::Ok(no_match());
+    }
+
+    auto best = route_ptr(router, best_index);
+
+    unsafe {
+        i64 captured = capture_params(router, *best, path, params, param_capacity)?;
+
+        return Result<Match, RouterError>::Ok(Match {
+            matched: true,
+            route_index: best_index,
+            handler_id: (*best).handler_id,
+            middleware_id: (*best).middleware_id,
+            parameter_count: captured,
+        }
+        );
+    }
+}
+
+public fn route_at(Router& router, i64 index) -> Route*const {
+    if (index < 0 || index >= router.route_count) {
+        unsafe {
+            return 0 as Route*const;
+        }
+    }
+    unsafe {
+        return route_ptr(router, index)as Route*const;
+    }
+}
+
+public fn param_at(usize storage, i64 count, i64 index) -> Param*const {
+    if (storage == 0 || index < 0 || index >= count) {
+        unsafe {
+            return 0 as Param*const;
+        }
+    }
+    unsafe {
+        return param_ptr(storage, index)as Param*const;
+    }
+}
+
+public fn method_mask(Method method) -> u64 {
+    match method {
+        Method::Any => {
+            return 1023;
+        }
+        Method::Get => {
+            return 1;
+        }
+        Method::Head => {
+            return 2;
+        }
+        Method::Post => {
+            return 4;
+        }
+        Method::Put => {
+            return 8;
+        }
+        Method::Patch => {
+            return 16;
+        }
+        Method::Delete => {
+            return 32;
+        }
+        Method::Options => {
+            return 64;
+        }
+        Method::Connect => {
+            return 128;
+        }
+        Method::Trace => {
+            return 256;
+        }
+        Method::Other => {
+            return 512;
+        }
+    }
+}
+
+/// Returns the known method mask for routes whose path matches `target`.
+/// GET also advertises HEAD because resolve() permits the normal HEAD fallback.
+public fn allowed_methods(Router& router, BytesView target) -> u64 {
+    BytesView path = path_without_query(target);
+
+    if (path.length <= 0 || path.data == 0 || load(path.data) != 47) {
+        return 0;
+    }
+
+    u64 mask = 0;
+    i64 index = 0;
+
+    while (index < router.route_count) {
+        auto candidate = route_ptr(router, index);
+
+        unsafe {
+            if (route_matches(router, *candidate, path)) {
+                u64 bit = method_mask((*candidate).method);
+
+                mask |= bit;
+                if ((*candidate).method == Method::Get || (*candidate).method == Method::Any) {
+                    mask |= method_mask(Method::Head);
+                }
+            }
+        }
+        index += 1;
+    }
+    return mask;
+}
+
+/// Looks up a captured parameter by its compiled name without allocation.
+public fn find_param(usize storage, i64 count, BytesView name) -> Param*const {
+    if (storage == 0 || count <= 0 || name.length <= 0) {
+        unsafe {
+            return 0 as Param*const;
+        }
+    }
+
+    i64 index = 0;
+
+    while (index < count) {
+        auto value = param_ptr(storage, index);
+
+        unsafe {
+            if (view_equal((*value).name, name)) {
+                return value as Param*const;
+            }
+        }
+        index += 1;
+    }
+    unsafe {
+        return 0 as Param*const;
+    }
+}

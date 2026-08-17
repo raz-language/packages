@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace http_router;
-// Public package surface. Implementations are added behind this facade as the package matures.
+public import http_router::router;
+public import http_router::middleware;
+public import http_router::http;
+
 public fn version_major() -> i64 {
     return 0;
 }
 
 public fn version_minor() -> i64 {
-    return 1;
+    return 2;
 }
 
 public fn version_patch() -> i64 {

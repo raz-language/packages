@@ -1,0 +1,695 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace postgres::wire;
+import core::result;
+
+public enum WireError {
+    Incomplete,
+    InvalidLength,
+    InvalidMessage,
+    OutputFull,
+    TooManyFields,
+}
+
+public struct MessageView {
+    u8 tag;
+    usize payload;
+    i64 payload_length;
+    i64 frame_length;
+}
+
+public struct FieldView {
+    usize data;
+    i64 length;
+    bool is_null;
+}
+
+fn load(usize p) -> i64 {
+    unsafe {
+        return (*((p)as u8*const))as i64;
+    }
+}
+
+fn store(usize p, i64 v) {
+    unsafe {
+        *((p)as u8*mut) = v as u8;
+    }
+}
+
+public fn read_i16_be(usize p) -> i64 {
+    return (load(p) << 8) | load(p + 1);
+}
+
+public fn read_i32_be(usize p) -> i64 {
+    return (load(p) << 24) | (load(p + 1) << 16) | (load(p + 2) << 8) | load(p + 3);
+}
+
+public fn write_i16_be(usize p, i64 v) {
+    store(p, (v >> 8) & 255);
+    store(p + 1, v & 255);
+}
+
+public fn write_i32_be(usize p, i64 v) {
+    store(p, (v >> 24) & 255);
+    store(p + 1, (v >> 16) & 255);
+    store(p + 2, (v >> 8) & 255);
+    store(p + 3, v & 255);
+}
+
+public fn parse_message(usize input, i64 length, i64 max_message) -> Result<MessageView, WireError> {
+    if (input == 0 || length < 5) {
+        return Result<MessageView, WireError>::Error(WireError::Incomplete);
+    }
+
+    i64 body = read_i32_be(input + 1);
+
+    if (body < 4) {
+        return Result<MessageView, WireError>::Error(WireError::InvalidLength);
+    }
+
+    i64 frame = body + 1;
+
+    if (max_message > 0 && frame > max_message) {
+        return Result<MessageView, WireError>::Error(WireError::InvalidLength);
+    }
+    if (frame > length) {
+        return Result<MessageView, WireError>::Error(WireError::Incomplete);
+    }
+    return Result<MessageView, WireError>::Ok(MessageView {
+        tag: load(input)as u8,
+        payload: input + 5,
+        payload_length: body - 4,
+        frame_length: frame,
+    }
+    );
+}
+
+fn cstring_length(usize p, i64 remaining) -> i64 {
+    i64 i = 0;
+
+    while (i < remaining) {
+        if (load(p + i) == 0) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+public fn write_startup(
+    usize output,
+    i64 capacity,
+    usize user,
+    i64 user_length,
+    usize database,
+    i64 database_length,
+    usize application,
+    i64 application_length,
+) -> Result<i64, WireError> {
+    i64 needed = 4 + 4 + 5 + user_length + 1;
+
+    if (database_length > 0) {
+        needed += 9 + database_length + 1;
+    }
+    if (application_length > 0) {
+        needed += 17 + application_length + 1;
+    }
+    needed += 1;
+    if (output == 0 || capacity < needed || user == 0 || user_length <= 0) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    write_i32_be(output, needed);
+    write_i32_be(output + 4, 196608);
+
+    i64 c = 8;
+
+    store(output + c, 117);
+    store(output + c + 1, 115);
+    store(output + c + 2, 101);
+    store(output + c + 3, 114);
+    store(output + c + 4, 0);
+    c += 5;
+
+    i64 i = 0;
+
+    while (i<user_length) {
+        store(output + c + i, load(user + i));
+        i += 1;
+    }
+    c += user_length;
+    store(output + c, 0);
+    c += 1;
+    if (database_length> 0) {
+        store(output + c, 100);
+        store(output + c + 1, 97);
+        store(output + c + 2, 116);
+        store(output + c + 3, 97);
+        store(output + c + 4, 98);
+        store(output + c + 5, 97);
+        store(output + c + 6, 115);
+        store(output + c + 7, 101);
+        store(output + c + 8, 0);
+        c += 9;
+        i = 0;
+        while (i<database_length) {
+            store(output + c + i, load(database + i));
+            i += 1;
+        }
+        c += database_length;
+        store(output + c, 0);
+        c += 1;
+    }
+    if (application_length> 0) {
+        // application_name\0
+
+        u8 key[17] = [97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 95, 110, 97, 109, 101, 0];
+
+        i = 0;
+        while (i<17) {
+            store(output + c + i, key[i]);
+            i += 1;
+        }
+        c += 17;
+        i = 0;
+        while (i<application_length) {
+            store(output + c + i, load(application + i));
+            i += 1;
+        }
+        c += application_length;
+        store(output + c, 0);
+        c += 1;
+    }
+    store(output + c, 0);
+    c += 1;
+    return Result<i64, WireError>::Ok(c);
+}
+
+public fn write_query(usize output, i64 capacity, usize sql, i64 sql_length) -> Result<i64, WireError> {
+    i64 needed = 1 + 4 + sql_length + 1;
+
+    if (output == 0 || capacity < needed || (sql_length> 0 && sql == 0)) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 81);
+    write_i32_be(output + 1, sql_length + 5);
+
+    i64 i = 0;
+
+    while (i<sql_length) {
+        store(output + 5 + i, load(sql + i));
+        i += 1;
+    }
+    store(output + 5 + sql_length, 0);
+    return Result<i64, WireError>::Ok(needed);
+}
+
+public fn write_sync(usize output, i64 capacity) -> Result<i64, WireError> {
+    if (output == 0 || capacity < 5) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 83);
+    write_i32_be(output + 1, 4);
+    return Result<i64, WireError>::Ok(5);
+}
+
+public fn write_terminate(usize output, i64 capacity) -> Result<i64, WireError> {
+    if (output == 0 || capacity < 5) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 88);
+    write_i32_be(output + 1, 4);
+    return Result<i64, WireError>::Ok(5);
+}
+
+public fn write_parse(
+    usize output,
+    i64 capacity,
+    usize name,
+    i64 name_length,
+    usize sql,
+    i64 sql_length,
+) -> Result<i64, WireError> {
+    i64 needed = 1 + 4 + name_length + 1 + sql_length + 1 + 2;
+
+    if (output == 0 || capacity < needed) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 80);
+    write_i32_be(output + 1, needed - 1);
+
+    i64 c = 5;
+    i64 i = 0;
+
+    while (i<name_length) {
+        store(output + c + i, load(name + i));
+        i += 1;
+    }
+    c += name_length;
+    store(output + c, 0);
+    c += 1;
+    i = 0;
+    while (i<sql_length) {
+        store(output + c + i, load(sql + i));
+        i += 1;
+    }
+    c += sql_length;
+    store(output + c, 0);
+    c += 1;
+    write_i16_be(output + c, 0);
+    c += 2;
+    return Result<i64, WireError>::Ok(c);
+}
+
+public fn parse_data_row(MessageView& message, usize fields, i64 field_capacity) -> Result<i64, WireError> {
+    if (message.tag != 68 || message.payload_length < 2) {
+        return Result<i64, WireError>::Error(WireError::InvalidMessage);
+    }
+
+    i64 count = read_i16_be(message.payload);
+
+    if (count < 0 || count> field_capacity) {
+        return Result<i64, WireError>::Error(WireError::TooManyFields);
+    }
+
+    i64 c = 2;
+    i64 n = 0;
+
+    while (n<count) {
+        if (c + 4> message.payload_length) {
+            return Result<i64, WireError>::Error(WireError::InvalidMessage);
+        }
+
+        i64 len = read_i32_be(message.payload + c);
+
+        c += 4;
+
+        auto f = (fields + n*(size_of<FieldView>()as i64))as FieldView*mut;
+
+        if (len == -1) {
+            unsafe {
+                (*f).data = 0;
+                (*f).length = 0;
+                (*f).is_null = true;
+            }
+        } else {
+            if (len<0 || c + len> message.payload_length) {
+                return Result<i64, WireError>::Error(WireError::InvalidMessage);
+            }
+            unsafe {
+                (*f).data = message.payload + c;
+                (*f).length = len;
+                (*f).is_null = false;
+            }
+            c += len;
+        }
+        n += 1;
+    }
+    if (c != message.payload_length) {
+        return Result<i64, WireError>::Error(WireError::InvalidMessage);
+    }
+    return Result<i64, WireError>::Ok(count);
+}
+
+public fn error_field(MessageView& message, u8 code) -> BytesView {
+    if (message.tag != 69 && message.tag != 78) {
+        return BytesView {
+            data: 0, length: 0
+        };
+    }
+
+    i64 c = 0;
+
+    while (c < message.payload_length) {
+        i64 k = load(message.payload + c);
+
+        c += 1;
+        if (k == 0) {
+            break;
+        }
+
+        i64 n = cstring_length(message.payload + c, message.payload_length - c);
+
+        if (n<0) {
+            break;
+        }
+        if (k == (code as i64)) {
+            return BytesView {
+                data: message.payload + c, length: n
+            };
+        }
+        c += n + 1;
+    }
+    return BytesView {
+        data: 0, length: 0
+    };
+}
+
+public struct BindValue {
+    usize data;
+    i64 length;
+    bool is_null;
+}
+
+public struct ColumnView {
+    usize name;
+    i64 name_length;
+    i64 table_oid;
+    i64 column_attribute;
+    i64 type_oid;
+    i64 type_size;
+    i64 type_modifier;
+    i64 format_code;
+}
+
+/// Builds a text-format Bind message. Parameter/result format code zero is
+/// PostgreSQL text format; values are borrowed from caller-owned buffers.
+public fn write_bind_text(
+    usize output,
+    i64 capacity,
+    usize portal,
+    i64 portal_length,
+    usize statement,
+    i64 statement_length,
+    usize values,
+    i64 value_count,
+) -> Result<i64, WireError> {
+    if (value_count < 0 || value_count> 32767) {
+        return Result<i64, WireError>::Error(WireError::InvalidLength);
+    }
+
+    i64 needed = 1 + 4 + portal_length + 1 + statement_length + 1 + 2 + 2 + 2;
+    i64 i = 0;
+
+    while (i < value_count) {
+        auto value = (values + i * (size_of<BindValue>()as i64))as BindValue*const;
+
+        unsafe {
+            needed += 4;
+            if (!(*value).is_null) {
+                if ((*value).length < 0 || ((*value).length> 0 && (*value).data == 0)) {
+                    return Result<i64, WireError>::Error(WireError::InvalidLength);
+                }
+                needed += (*value).length;
+            }
+        }
+        i += 1;
+    }
+    if (output == 0 || capacity < needed) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 66);
+    write_i32_be(output + 1, needed - 1);
+
+    i64 c = 5;
+
+    i = 0;
+    while (i < portal_length) {
+        store(output + c + i, load(portal + i));
+        i += 1;
+    }
+    c += portal_length;
+    store(output + c, 0);
+    c += 1;
+    i = 0;
+    while (i < statement_length) {
+        store(output + c + i, load(statement + i));
+        i += 1;
+    }
+    c += statement_length;
+    store(output + c, 0);
+    c += 1;
+    // Zero per-parameter format codes means all parameters use text format.
+    write_i16_be(output + c, 0);
+    c += 2;
+    write_i16_be(output + c, value_count);
+    c += 2;
+    i = 0;
+    while (i < value_count) {
+        auto value = (values + i * (size_of<BindValue>()as i64))as BindValue*const;
+
+        unsafe {
+            if ((*value).is_null) {
+                write_i32_be(output + c, -1);
+                c += 4;
+            } else {
+                write_i32_be(output + c, (*value).length);
+                c += 4;
+
+                i64 j = 0;
+
+                while (j < (*value).length) {
+                    store(output + c + j, load((*value).data + j));
+                    j += 1;
+                }
+                c += (*value).length;
+            }
+        }
+        i += 1;
+    }
+    // Zero result format codes means text results for every column.
+    write_i16_be(output + c, 0);
+    c += 2;
+    return Result<i64, WireError>::Ok(c);
+}
+
+public fn write_describe_statement(
+    usize output,
+    i64 capacity,
+    usize name,
+    i64 name_length,
+) -> Result<i64, WireError> {
+    i64 needed = 1 + 4 + 1 + name_length + 1;
+
+    if (output == 0 || capacity < needed) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 68);
+    write_i32_be(output + 1, needed - 1);
+    store(output + 5, 83);
+
+    i64 i = 0;
+
+    while (i < name_length) {
+        store(output + 6 + i, load(name + i));
+        i += 1;
+    }
+    store(output + 6 + name_length, 0);
+    return Result<i64, WireError>::Ok(needed);
+}
+
+public fn write_execute(
+    usize output,
+    i64 capacity,
+    usize portal,
+    i64 portal_length,
+    i64 max_rows,
+) -> Result<i64, WireError> {
+    if (max_rows < 0) {
+        return Result<i64, WireError>::Error(WireError::InvalidLength);
+    }
+
+    i64 needed = 1 + 4 + portal_length + 1 + 4;
+
+    if (output == 0 || capacity < needed) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 69);
+    write_i32_be(output + 1, needed - 1);
+
+    i64 i = 0;
+
+    while (i < portal_length) {
+        store(output + 5 + i, load(portal + i));
+        i += 1;
+    }
+    store(output + 5 + portal_length, 0);
+    write_i32_be(output + 6 + portal_length, max_rows);
+    return Result<i64, WireError>::Ok(needed);
+}
+
+public fn write_close_statement(
+    usize output,
+    i64 capacity,
+    usize name,
+    i64 name_length,
+) -> Result<i64, WireError> {
+    i64 needed = 1 + 4 + 1 + name_length + 1;
+
+    if (output == 0 || capacity < needed) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 67);
+    write_i32_be(output + 1, needed - 1);
+    store(output + 5, 83);
+
+    i64 i = 0;
+
+    while (i < name_length) {
+        store(output + 6 + i, load(name + i));
+        i += 1;
+    }
+    store(output + 6 + name_length, 0);
+    return Result<i64, WireError>::Ok(needed);
+}
+
+public fn parse_row_description(
+    MessageView& message,
+    usize columns,
+    i64 column_capacity,
+) -> Result<i64, WireError> {
+    if (message.tag != 84 || message.payload_length < 2) {
+        return Result<i64, WireError>::Error(WireError::InvalidMessage);
+    }
+
+    i64 count = read_i16_be(message.payload);
+
+    if (count < 0 || count> column_capacity) {
+        return Result<i64, WireError>::Error(WireError::TooManyFields);
+    }
+
+    i64 c = 2;
+    i64 n = 0;
+
+    while (n < count) {
+        i64 name_length = cstring_length(message.payload + c, message.payload_length - c);
+
+        if (name_length < 0) {
+            return Result<i64, WireError>::Error(WireError::InvalidMessage);
+        }
+
+        i64 fixed = c + name_length + 1;
+
+        if (fixed + 18> message.payload_length) {
+            return Result<i64, WireError>::Error(WireError::InvalidMessage);
+        }
+
+        auto column = (columns + n * (size_of<ColumnView>()as i64))as ColumnView*mut;
+
+        unsafe {
+            (*column).name = message.payload + c;
+            (*column).name_length = name_length;
+            (*column).table_oid = read_i32_be(message.payload + fixed);
+            (*column).column_attribute = read_i16_be(message.payload + fixed + 4);
+            (*column).type_oid = read_i32_be(message.payload + fixed + 6);
+            (*column).type_size = read_i16_be(message.payload + fixed + 10);
+            (*column).type_modifier = read_i32_be(message.payload + fixed + 12);
+            (*column).format_code = read_i16_be(message.payload + fixed + 16);
+        }
+        c = fixed + 18;
+        n += 1;
+    }
+    if (c != message.payload_length) {
+        return Result<i64, WireError>::Error(WireError::InvalidMessage);
+    }
+    return Result<i64, WireError>::Ok(count);
+}
+
+/// PasswordMessage for cleartext/MD5-compatible authentication payloads.
+public fn write_password(
+    usize output,
+    i64 capacity,
+    usize password,
+    i64 password_length,
+) -> Result<i64, WireError> {
+    i64 needed = 1 + 4 + password_length + 1;
+
+    if (output == 0 || capacity < needed || password_length < 0 || (password_length > 0 && password == 0)) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 112);
+    write_i32_be(output + 1, password_length + 5);
+
+    i64 i = 0;
+
+    while (i < password_length) {
+        store(output + 5 + i, load(password + i));
+        i += 1;
+    }
+    store(output + 5 + password_length, 0);
+    return Result<i64, WireError>::Ok(needed);
+}
+
+/// SASLInitialResponse carried in PostgreSQL's PasswordMessage tag.
+public fn write_sasl_initial(
+    usize output,
+    i64 capacity,
+    usize mechanism,
+    i64 mechanism_length,
+    usize response,
+    i64 response_length,
+) -> Result<i64, WireError> {
+    if (mechanism_length <= 0 || response_length < 0) {
+        return Result<i64, WireError>::Error(WireError::InvalidLength);
+    }
+
+    i64 needed = 1 + 4 + mechanism_length + 1 + 4 + response_length;
+
+    if (output == 0 || capacity < needed) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 112);
+    write_i32_be(output + 1, needed - 1);
+
+    i64 c = 5;
+    i64 i = 0;
+
+    while (i < mechanism_length) {
+        store(output + c + i, load(mechanism + i));
+        i += 1;
+    }
+    c += mechanism_length;
+    store(output + c, 0);
+    c += 1;
+    write_i32_be(output + c, response_length);
+    c += 4;
+    i = 0;
+    while (i < response_length) {
+        store(output + c + i, load(response + i));
+        i += 1;
+    }
+    return Result<i64, WireError>::Ok(needed);
+}
+
+/// SASLResponse carried in PostgreSQL's PasswordMessage tag.
+public fn write_sasl_response(
+    usize output,
+    i64 capacity,
+    usize response,
+    i64 response_length,
+) -> Result<i64, WireError> {
+    i64 needed = 1 + 4 + response_length;
+
+    if (output == 0 || capacity < needed || response_length < 0) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    store(output, 112);
+    write_i32_be(output + 1, response_length + 4);
+
+    i64 i = 0;
+
+    while (i < response_length) {
+        store(output + 5 + i, load(response + i));
+        i += 1;
+    }
+    return Result<i64, WireError>::Ok(needed);
+}
+
+/// PostgreSQL SSLRequest. Send this before StartupMessage. A supporting server
+/// replies with one byte `S`; `N` means TLS is unavailable.
+public fn write_ssl_request(usize output, i64 capacity) -> Result<i64, WireError> {
+    if (output == 0 || capacity < 8) {
+        return Result<i64, WireError>::Error(WireError::OutputFull);
+    }
+    write_i32_be(output, 8);
+    write_i32_be(output + 4, 80877103);
+    return Result<i64, WireError>::Ok(8);
+}
+
+public fn ssl_response_supported(u8 response) -> bool {
+    return response == 83;
+}
+
+public fn ssl_response_rejected(u8 response) -> bool {
+    return response == 78;
+}

@@ -1,0 +1,130 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace postgres::receive;
+import core::result;
+import std::net;
+import postgres::wire;
+
+public enum ReceiveError {
+    InvalidBuffer,
+    BufferFull,
+    Io,
+    NeedMore,
+    Closed,
+    Protocol
+}
+
+/// Incremental backend-message framing over caller-owned storage.
+/// Consumed bytes are compacted only when required to make receive space.
+public struct Receiver {
+    usize buffer;
+    i64 capacity;
+    i64 start;
+    i64 end;
+    i64 max_message;
+}
+
+public fn init(usize buffer, i64 capacity, i64 max_message) -> Receiver {
+    return Receiver {
+        buffer: buffer,
+        capacity: capacity,
+        start: 0,
+        end: 0,
+        max_message: max_message
+    };
+}
+
+public fn buffered(Receiver& receiver) -> i64 {
+    return receiver.end - receiver.start;
+}
+
+public fn reset(Receiver&mut receiver) {
+    receiver.start = 0;
+    receiver.end = 0;
+}
+
+public fn compact(Receiver&mut receiver) -> bool {
+    if (
+        receiver.buffer == 0 ||
+        receiver.capacity <= 0 ||
+        receiver.start < 0 ||
+        receiver.end < receiver.start
+    ) {
+        return false;
+    }
+    if (receiver.start == 0) {
+        return true;
+    }
+
+    i64 count = receiver.end - receiver.start;
+    i64 i = 0;
+
+    while (i < count) {
+        unsafe {
+            *((receiver.buffer + i)as u8*mut) = *((receiver.buffer + receiver.start + i)as u8*const);
+        }
+        i += 1;
+    }
+    receiver.start = 0;
+    receiver.end = count;
+    return true;
+}
+
+/// Borrows the next complete backend frame without consuming it.
+public fn peek(Receiver& receiver) -> Result<wire::MessageView, ReceiveError> {
+    if (receiver.buffer == 0 || receiver.capacity <= 0) {
+        return Result<wire::MessageView, ReceiveError>::Error(ReceiveError::InvalidBuffer);
+    }
+    auto parsed = wire::parse_message(
+        receiver.buffer + receiver.start,
+        buffered(receiver),
+        receiver.max_message,
+    );
+    match parsed {
+        Result<wire::MessageView, wire::WireError>::Ok(message) => {
+            return Result<wire::MessageView, ReceiveError>::Ok(message);
+        }
+        Result<wire::MessageView, wire::WireError>::Error(wire::WireError::Incomplete) => {
+            return Result<wire::MessageView, ReceiveError>::Error(ReceiveError::NeedMore);
+        }
+        Result<wire::MessageView, wire::WireError>::Error(_) => {
+            return Result<wire::MessageView, ReceiveError>::Error(ReceiveError::Protocol);
+        }
+    }
+}
+
+public fn consume(Receiver&mut receiver, i64 frame_length) -> bool {
+    if (frame_length <= 0 || frame_length > buffered(receiver)) {
+        return false;
+    }
+    receiver.start += frame_length;
+    if (receiver.start == receiver.end) {
+        reset(receiver);
+    }
+    return true;
+}
+
+/// Reads additional bytes from a blocking TCP socket. Returns bytes received.
+public fn fill_tcp(Receiver&mut receiver, i64 socket) -> Result<i64, ReceiveError> {
+    if (receiver.buffer == 0 || receiver.capacity <= 0 || socket < 0) {
+        return Result<i64, ReceiveError>::Error(ReceiveError::InvalidBuffer);
+    }
+    if (receiver.end == receiver.capacity && receiver.start > 0) {
+        compact(receiver);
+    }
+    if (receiver.end == receiver.capacity) {
+        return Result<i64, ReceiveError>::Error(ReceiveError::BufferFull);
+    }
+
+    i64 count = std::net::receive(socket, receiver.buffer + receiver.end, receiver.capacity - receiver.end);
+
+    if (count < 0) {
+        return Result<i64, ReceiveError>::Error(ReceiveError::Io);
+    }
+    if (count == 0) {
+        return Result<i64, ReceiveError>::Error(ReceiveError::Closed);
+    }
+    receiver.end += count;
+    return Result<i64, ReceiveError>::Ok(count);
+}

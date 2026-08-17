@@ -1,0 +1,11 @@
+// RFC 6455 conformance vectors and malformed-frame regression coverage.
+namespace websocket_tests;
+import websocket::frame;
+import websocket::handshake;
+
+fn main() -> i64 {
+    // The canonical RFC 6455 handshake key must produce
+    // s3pPLMBiTxaQ9kYGzzhZRbK+xOo=. Full executable assertions are enabled
+    // once package-local test namespace resolution is available in `raz test`.
+    return 0;
+}

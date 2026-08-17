@@ -1,0 +1,183 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace postgres::tls;
+import core::result;
+import std::net;
+import std::net::tls;
+import postgres::wire;
+
+public enum PgTlsError {
+    None,
+    InvalidArgument,
+    Unavailable,
+    Send,
+    Receive,
+    Rejected,
+    Protocol,
+    Handshake,
+    Io,
+    Closed
+}
+
+/// TLS over a PostgreSQL socket after the protocol-specific SSLRequest exchange.
+/// Scratch storage is caller-owned and reused for encrypted records.
+public struct PgTls {
+    i64 socket;
+    std::net::tls::TlsEngine engine;
+    usize scratch;
+    i64 scratch_capacity;
+    bool ready;
+}
+
+fn flush(PgTls& stream) -> bool {
+    while (std::net::tls::engine_pending_encrypted(&stream.engine) > 0) {
+        i64 count = std::net::tls::engine_drain(&mut stream.engine, stream.scratch, stream.scratch_capacity);
+
+        if (count < 0) {
+            return false;
+        }
+        if (count == 0) {
+            break;
+        }
+        if (std::net::send_all(stream.socket, stream.scratch, count) != count) {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn feed_socket(PgTls& stream) -> i64 {
+    i64 count = std::net::receive(stream.socket, stream.scratch, stream.scratch_capacity);
+
+    if (count <= 0) {
+        return count;
+    }
+    if (std::net::tls::engine_feed(&mut stream.engine, stream.scratch, count) < 0) {
+        return -1;
+    }
+    return count;
+}
+
+/// Sends PostgreSQL SSLRequest, verifies `S`, then performs a blocking TLS handshake
+/// on the existing socket using Raz's verified client TLS engine.
+public fn upgrade(
+    i64 socket,
+    usize host,
+    i64 host_length,
+    usize scratch,
+    i64 scratch_capacity,
+) -> Result<PgTls, PgTlsError> {
+    if (socket < 0 || host == 0 || host_length <= 0 || scratch == 0 || scratch_capacity < 1024) {
+        return Result<PgTls, PgTlsError>::Error(PgTlsError::InvalidArgument);
+    }
+    if (!std::net::tls::available()) {
+        return Result<PgTls, PgTlsError>::Error(PgTlsError::Unavailable);
+    }
+
+    u8 request[8];
+    auto request_length = wire::write_ssl_request(request as usize, 8);
+
+    if (request_length.is_error() || std::net::send_all(socket, request as usize, 8) != 8) {
+        return Result<PgTls, PgTlsError>::Error(PgTlsError::Send);
+    }
+
+    u8 response[1];
+
+    if (std::net::receive_exact(socket, response as usize, 1) != 1) {
+        return Result<PgTls, PgTlsError>::Error(PgTlsError::Receive);
+    }
+    if (wire::ssl_response_rejected(response[0])) {
+        return Result<PgTls, PgTlsError>::Error(PgTlsError::Rejected);
+    }
+    if (!wire::ssl_response_supported(response[0])) {
+        return Result<PgTls, PgTlsError>::Error(PgTlsError::Protocol);
+    }
+
+    auto engine = std::net::tls::engine_create_client(host, host_length);
+
+    if (!std::net::tls::engine_valid(&engine)) {
+        return Result<PgTls, PgTlsError>::Error(PgTlsError::Unavailable);
+    }
+    PgTls stream = PgTls {
+        socket: socket,
+        engine: move engine,
+        scratch: scratch,
+        scratch_capacity: scratch_capacity,
+        ready: false
+    };
+    while (!std::net::tls::engine_handshaken(&stream.engine)) {
+        i64 state = std::net::tls::engine_handshake(&mut stream.engine);
+
+        if (!flush(&stream)) {
+            return Result<PgTls, PgTlsError>::Error(PgTlsError::Io);
+        }
+        if (state < 0) {
+            return Result<PgTls, PgTlsError>::Error(PgTlsError::Handshake);
+        }
+        if (std::net::tls::engine_handshaken(&stream.engine)) {
+            break;
+        }
+        if (feed_socket(&stream) <= 0) {
+            return Result<PgTls, PgTlsError>::Error(PgTlsError::Closed);
+        }
+    }
+    stream.ready = true;
+    return Result<PgTls, PgTlsError>::Ok(move stream);
+}
+
+public fn write_all(PgTls& stream, usize data, i64 length) -> PgTlsError {
+    if (!stream.ready || length < 0 || (length > 0 && data == 0)) {
+        return PgTlsError::InvalidArgument;
+    }
+
+    i64 offset = 0;
+
+    while (offset < length) {
+        i64 count = std::net::tls::engine_write(&mut stream.engine, data + offset, length - offset);
+
+        if (!flush(stream)) {
+            return PgTlsError::Io;
+        }
+        if (count < 0) {
+            return PgTlsError::Io;
+        }
+        if (count > 0) {
+            offset += count;
+            continue;
+        }
+        if (feed_socket(stream) <= 0) {
+            return PgTlsError::Closed;
+        }
+    }
+    return PgTlsError::None;
+}
+
+public fn read(PgTls& stream, usize output, i64 capacity) -> i64 {
+    if (!stream.ready || capacity < 0 || (capacity > 0 && output == 0)) {
+        return -1;
+    }
+    while (true) {
+        i64 count = std::net::tls::engine_read(&mut stream.engine, output, capacity);
+
+        if (count != 0) {
+            flush(stream);
+            return count;
+        }
+        if (!flush(stream)) {
+            return -1;
+        }
+        if (feed_socket(stream) <= 0) {
+            return -2;
+        }
+    }
+}
+
+public fn close(PgTls& stream) {
+    if (stream.ready) {
+        std::net::tls::engine_shutdown(&mut stream.engine);
+        flush(stream);
+    }
+    std::net::tls::engine_destroy(&mut stream.engine);
+    stream.ready = false;
+}

@@ -3,11 +3,14 @@
 
 [package]
 name = "sqlite"
-version = "0.1.0"
+version = "0.3.0"
 kind = "static-library"
 entry = "src/lib.rz"
 
 [dependencies]
+
+[native]
+libraries = ["sqlite3"]
 
 [profile.debug]
 optimization = 0

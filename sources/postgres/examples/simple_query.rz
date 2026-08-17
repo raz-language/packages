@@ -1,0 +1,16 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace postgres_simple_query;
+import postgres::wire;
+
+fn main() -> i64 {
+    u8 out[64];
+    i64 q[8] = [83, 69, 76, 69, 67, 84, 32, 49];
+    auto n = wire::write_query(&out, 64, &q, 8);
+
+    if (n.is_error()) {
+        return 1;
+    }
+    return 0;
+}

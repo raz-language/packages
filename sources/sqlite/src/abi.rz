@@ -1,0 +1,51 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace sqlite::abi;
+
+// SQLite is a permanent external C ABI boundary. The safe/resource-owning API
+// lives in Raz; this module intentionally mirrors only the C calls it needs.
+extern fn sqlite3_libversion_number() -> i64;
+extern fn sqlite3_open_v2(usize filename, usize&mut db_out, i64 flags, usize vfs) -> i64;
+extern fn sqlite3_close_v2(usize db) -> i64;
+extern fn sqlite3_errcode(usize db) -> i64;
+extern fn sqlite3_extended_errcode(usize db) -> i64;
+extern fn sqlite3_errmsg(usize db) -> usize;
+extern fn sqlite3_busy_timeout(usize db, i64 milliseconds) -> i64;
+extern fn sqlite3_changes64(usize db) -> i64;
+extern fn sqlite3_last_insert_rowid(usize db) -> i64;
+extern fn sqlite3_prepare_v3(usize db, usize sql, i64 sql_length, u32 flags, usize&mut statement_out, usize tail_out) -> i64;
+extern fn sqlite3_finalize(usize statement) -> i64;
+extern fn sqlite3_reset(usize statement) -> i64;
+extern fn sqlite3_clear_bindings(usize statement) -> i64;
+extern fn sqlite3_step(usize statement) -> i64;
+extern fn sqlite3_bind_parameter_count(usize statement) -> i64;
+extern fn sqlite3_bind_null(usize statement, i64 index) -> i64;
+extern fn sqlite3_bind_int64(usize statement, i64 index, i64 value) -> i64;
+extern fn sqlite3_bind_double(usize statement, i64 index, f64 value) -> i64;
+extern fn sqlite3_bind_text64(usize statement, i64 index, usize data, u64 length, usize destructor, u8 encoding) -> i64;
+extern fn sqlite3_bind_blob64(usize statement, i64 index, usize data, u64 length, usize destructor) -> i64;
+extern fn sqlite3_column_count(usize statement) -> i64;
+extern fn sqlite3_column_type(usize statement, i64 column) -> i64;
+extern fn sqlite3_column_int64(usize statement, i64 column) -> i64;
+extern fn sqlite3_column_double(usize statement, i64 column) -> f64;
+extern fn sqlite3_column_text(usize statement, i64 column) -> usize;
+extern fn sqlite3_column_blob(usize statement, i64 column) -> usize;
+extern fn sqlite3_column_bytes(usize statement, i64 column) -> i64;
+extern fn sqlite3_column_name(usize statement, i64 column) -> usize;
+
+public fn ok() -> i64 { return 0; }
+public fn row() -> i64 { return 100; }
+public fn done() -> i64 { return 101; }
+public fn open_readonly() -> i64 { return 1; }
+public fn open_readwrite() -> i64 { return 2; }
+public fn open_create() -> i64 { return 4; }
+public fn open_uri() -> i64 { return 64; }
+public fn open_memory() -> i64 { return 128; }
+public fn prepare_persistent() -> u32 { return 1 as u32; }
+public fn utf8() -> u8 { return 1 as u8; }
+
+/// SQLITE_TRANSIENT asks SQLite to copy bind input before the call returns.
+public fn transient_destructor() -> usize {
+    return 0xffffffffffffffff as usize;
+}

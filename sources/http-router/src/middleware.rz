@@ -1,0 +1,67 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace http_router::middleware;
+import std::net::http;
+import http_router::router;
+/// Request-scoped routing context. All request and parameter views are borrowed
+/// from buffers owned by the caller/HTTP connection.
+public struct Context {
+    HttpRequestView request;
+    Match route_match;
+    usize params;
+    i64 param_count;
+    i64 state;
+    bool stopped;
+}
+
+public fn context(HttpRequestView request, Match route_match, usize params) -> Context {
+    return Context {
+        request: request,
+        route_match: route_match,
+        params: params,
+        param_count: route_match.parameter_count,
+        state: 0,
+        stopped: false,
+    };
+}
+
+public fn stop(Context&mut context) {
+    context.stopped = true;
+}
+
+public fn parameter(Context& context, i64 index) -> Param*const {
+    return http_router::router::param_at(context.params, context.param_count, index);
+}
+
+public fn parameter_named(Context& context, BytesView name) -> Param*const {
+    return http_router::router::find_param(context.params, context.param_count, name);
+}
+
+/// Executes an application-defined middleware chain through a compact chain ID.
+/// The router does not own closures or allocate callback nodes; applications can
+/// map the ID to ordinary functions/closures in whatever representation fits
+/// their server architecture.
+public fn run(Context&mut context, fn(i64, Context&mut) -> bool dispatch) -> bool {
+    if (context.stopped) {
+        return false;
+    }
+    if (context.route_match.middleware_id < 0) {
+        return true;
+    }
+
+    bool proceed = dispatch(context.route_match.middleware_id, context);
+
+    if (!proceed) {
+        context.stopped = true;
+    }
+    return proceed;
+}
+
+/// Dispatches the matched route handler after middleware has succeeded.
+public fn dispatch(Context&mut context, fn(i64, Context&mut) -> i64 handler_dispatch) -> i64 {
+    if (context.stopped || !context.route_match.matched || context.route_match.handler_id < 0) {
+        return -1;
+    }
+    return handler_dispatch(context.route_match.handler_id, context);
+}

@@ -2,15 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace websocket;
-// Public package surface. Implementations are added behind this facade as the package matures.
-public fn version_major() -> i64 {
-    return 0;
-}
+public import websocket::frame;
+public import websocket::handshake;
 
-public fn version_minor() -> i64 {
-    return 1;
-}
-
-public fn version_patch() -> i64 {
-    return 0;
-}
+public fn version_major() -> i64 { return 0; }
+public fn version_minor() -> i64 { return 2; }
+public fn version_patch() -> i64 { return 0; }

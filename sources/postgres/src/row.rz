@@ -1,0 +1,86 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace postgres::row;
+import core::result;
+import postgres::wire;
+
+public enum ValueError {
+    Null,
+    InvalidInteger,
+    Overflow,
+    InvalidBoolean
+}
+
+fn load(usize p) -> i64 {
+    unsafe {
+        return (*((p)as u8*const))as i64;
+    }
+}
+
+public fn as_bytes(wire::FieldView& field) -> BytesView {
+    return BytesView {
+        data: field.data,
+        length: field.length
+    };
+}
+
+public fn is_null(wire::FieldView& field) -> bool {
+    return field.is_null;
+}
+
+public fn as_bool(wire::FieldView& field) -> Result<bool, ValueError> {
+    if (field.is_null) {
+        return Result<bool, ValueError>::Error(ValueError::Null);
+    }
+    if (field.length == 1) {
+        i64 v = load(field.data);
+
+        if (v == 116 || v == 49) {
+            return Result<bool, ValueError>::Ok(true);
+        }
+        if (v == 102 || v == 48) {
+            return Result<bool, ValueError>::Ok(false);
+        }
+    }
+    return Result<bool, ValueError>::Error(ValueError::InvalidBoolean);
+}
+
+public fn as_i64(wire::FieldView& field) -> Result<i64, ValueError> {
+    if (field.is_null) {
+        return Result<i64, ValueError>::Error(ValueError::Null);
+    }
+    if (field.length <= 0) {
+        return Result<i64, ValueError>::Error(ValueError::InvalidInteger);
+    }
+
+    i64 i = 0;
+    bool neg = false;
+
+    if (load(field.data) == 45) {
+        neg = true;
+        i = 1;
+        if (i == field.length) {
+            return Result<i64, ValueError>::Error(ValueError::InvalidInteger);
+        }
+    }
+
+    i64 v = 0;
+
+    while (i<field.length) {
+        i64 d = load(field.data + i) - 48;
+
+        if (d<0 || d> 9) {
+            return Result<i64, ValueError>::Error(ValueError::InvalidInteger);
+        }
+        if (v>(i64::MAX - d) / 10) {
+            return Result<i64, ValueError>::Error(ValueError::Overflow);
+        }
+        v = v*10 + d;
+        i += 1;
+    }
+    if (neg) {
+        v = -v;
+    }
+    return Result<i64, ValueError>::Ok(v);
+}

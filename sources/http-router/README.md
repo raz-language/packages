@@ -1,26 +1,43 @@
 # http-router
 
-High-performance HTTP routing and middleware for Raz.
+High-performance, allocation-conscious HTTP routing for Raz.
 
-> **Status:** initial package scaffold. The public API is not stable yet.
+`http-router` compiles route patterns once into caller-owned route/segment storage and matches directly against borrowed `std::net::http::HttpRequestView` data. The hot path does not allocate or copy path/parameter strings.
 
-## Goals
+## Features
 
-- [ ] static routes
-- [ ] path parameters
-- [ ] wildcards
-- [ ] method dispatch
-- [ ] middleware chain
-- [ ] allocation-conscious matching
+- method-aware dispatch (`GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `CONNECT`, `TRACE`, or `Any`)
+- static routes such as `/health`
+- named path parameters such as `/users/:id`
+- final wildcard tails such as `/assets/*path`
+- query-string exclusion during path matching
+- duplicate-route and malformed-pattern rejection
+- allowed-method masks for 405/`Allow` handling
+- indexed and named borrowed parameter lookup
+- static-first specificity ranking independent of registration order
+- first-static-segment hash prefilter
+- borrowed parameter spans into the original request target
+- caller-owned route, segment, and parameter storage
+- middleware-chain and handler IDs with typed dispatcher hooks
+- direct adapter for Raz stdlib `HttpRequestView`
+- no hidden allocation in route compilation or matching
 
-## Dependencies
+## Pattern rules
 
-None.
+Patterns must begin with `/`. Parameter names begin with `:` and wildcard names begin with `*`. A wildcard must be the final segment. Duplicate parameter names inside one route are rejected.
 
-## Design rules
+```text
+/
+/health
+/users/:id
+/teams/:team/members/:member
+/assets/*path
+```
 
-- Native Raz implementation wherever practical.
-- Explicit errors through `Result` for recoverable failures.
-- Avoid hidden allocations on hot paths.
-- Keep the public surface small and composable.
-- Add malformed/adversarial-input tests for parser, protocol, and security code.
+## Integration
+
+The router deliberately does not own sockets, a blocking server loop, response buffers, or application closures. Use it with `std::net::http`, `std::net::http::server`, and `std::net::reactor`. A match returns stable application handler/middleware IDs; the application can dispatch those IDs to normal Raz functions or closures.
+
+## Performance model
+
+Compiled route metadata and request parameters live in caller-provided storage. Static first segments are hash-prefiltered, and matching returns borrowed `BytesView` values instead of constructing strings. This keeps routing suitable for retained-buffer/reactor servers.

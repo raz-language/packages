@@ -2,13 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace postgres;
-// Public package surface. Implementations are added behind this facade as the package matures.
+public import postgres::wire;
+public import postgres::row;
+public import postgres::auth;
+public import postgres::client;
+public import postgres::receive;
+public import postgres::extended;
+public import postgres::pool;
+public import postgres::tls;
+
 public fn version_major() -> i64 {
     return 0;
 }
 
 public fn version_minor() -> i64 {
-    return 1;
+    return 3;
 }
 
 public fn version_patch() -> i64 {

@@ -1,0 +1,18 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace http_router::http;
+import core::result;
+import std::net::http;
+import http_router::router;
+/// Matches directly from Raz stdlib's borrowed HttpRequestView.
+public fn match_request(
+    Router& router,
+    HttpRequestView& request,
+    usize params,
+    i64 param_capacity,
+) -> Result<Match, RouterError> {
+    Method method = http_router::router::method_from_bytes(request.method);
+
+    return http_router::router::resolve(router, method, request.target, params, param_capacity);
+}

@@ -2,8 +2,14 @@ crypto 0.2.0 packages/crypto/0.2.0.dpk 4b3d8ee62066fa71
 crypto 0.3.0 packages/crypto/0.3.0.dpk 1df2e1c031b738e3
 crypto 0.4.0 packages/crypto/0.4.0.dpk 29c5d0340794fcfe
 datetime 0.2.0 packages/datetime/0.2.0.dpk 7ac713492ee461a1
+http-router 0.2.0 packages/http-router/0.2.0.dpk 855c18e6062f3892
+postgres 0.2.0 packages/postgres/0.2.0.dpk d477f8da171c0435
+postgres 0.3.0 packages/postgres/0.3.0.dpk 04a23207c8931529
 regex 0.2.0 packages/regex/0.2.0.dpk 5692e2b54eb5ee64
 semver 0.2.0 packages/semver/0.2.0.dpk fd58f9d6c9c7552a
 serde 0.2.0 packages/serde/0.2.0.dpk 60f152b9397fe2d3
+sqlite 0.2.0 packages/sqlite/0.2.0.dpk 1d7b0d4385aa16ee
+sqlite 0.3.0 packages/sqlite/0.3.0.dpk aa227f45bc4bab2a
 toml 0.2.0 packages/toml/0.2.0.dpk 742c52a8136206bf
 uuid 0.2.0 packages/uuid/0.2.0.dpk df3d25063958427c
+websocket 0.2.0 packages/websocket/0.2.0.dpk f39fda7ace69ad43

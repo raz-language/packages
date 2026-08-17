@@ -1,0 +1,183 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import core::result;
+import http_router;
+
+fn main() -> i64 {
+    Route routes[16];
+    Segment segments[64];
+    Param params[8];
+    Router router = http_router::router::init(routes as usize, 16, segments as usize, 64);
+    u8 static_pattern[9] = [47, 117, 115, 101, 114, 115, 47, 109, 101];
+    u8 parameter_pattern[10] = [47, 117, 115, 101, 114, 115, 47, 58, 105, 100];
+    u8 wildcard_pattern[13] = [47, 97, 115, 115, 101, 116, 115, 47, 42, 112, 97, 116, 104];
+
+    // Register the parameter route first to prove specificity, not insertion
+    // order, selects the static /users/me route below.
+    match http_router::router::add(&mut router, Method::Get, parameter_pattern as usize, 10, 20, 3) {
+        Result<i64, RouterError>::Error(_) => {
+            return 1;
+        }
+        Result<i64, RouterError>::Ok(_) => {}
+    }
+    match http_router::router::add(&mut router, Method::Get, static_pattern as usize, 9, 10, -1) {
+        Result<i64, RouterError>::Error(_) => {
+            return 2;
+        }
+        Result<i64, RouterError>::Ok(_) => {}
+    }
+    match http_router::router::add(&mut router, Method::Head, static_pattern as usize, 9, 11, -1) {
+        Result<i64, RouterError>::Error(_) => {
+            return 3;
+        }
+        Result<i64, RouterError>::Ok(_) => {}
+    }
+    match http_router::router::add(&mut router, Method::Get, wildcard_pattern as usize, 13, 30, -1) {
+        Result<i64, RouterError>::Error(_) => {
+            return 3;
+        }
+        Result<i64, RouterError>::Ok(_) => {}
+    }
+
+    u8 static_target[9] = [47, 117, 115, 101, 114, 115, 47, 109, 101];
+    Match static_match = http_router::router::no_match();
+
+    BytesView static_view = BytesView {
+        data: static_target as usize,
+        length: 9
+    };
+
+    auto static_result = http_router::router::resolve(&router, Method::Get, static_view, params as usize, 8);
+
+    match static_result {
+        Result<Match, RouterError>::Error(_) => {
+            return 4;
+        }
+        Result<Match, RouterError>::Ok(found) => {
+            static_match = found;
+        }
+    }
+    if (!static_match.matched || static_match.handler_id != 10 || static_match.parameter_count != 0) {
+        return 4;
+    }
+
+    u8 parameter_target[13] = [47, 117, 115, 101, 114, 115, 47, 52, 50, 63, 120, 61, 49];
+    Match parameter_match = http_router::router::no_match();
+
+    BytesView parameter_view = BytesView {
+        data: parameter_target as usize,
+        length: 13
+    };
+    auto parameter_result = http_router::router::resolve(
+        &router,
+        Method::Get,
+        parameter_view,
+        params as usize,
+        8,
+    );
+    match parameter_result {
+        Result<Match, RouterError>::Error(_) => {
+            return 5;
+        }
+        Result<Match, RouterError>::Ok(found) => {
+            parameter_match = found;
+        }
+    }
+    if (
+        !parameter_match.matched ||
+        parameter_match.handler_id != 20 ||
+        parameter_match.parameter_count != 1
+    ) {
+        return 5;
+    }
+    if (params[0].value.length != 2) {
+        return 6;
+    }
+
+    u8 wildcard_target[20] = [47, 97, 115, 115, 101, 116, 115, 47, 99, 115, 115, 47, 97, 112, 112, 46, 99, 115, 115, 0];
+    Match wildcard_match = http_router::router::no_match();
+
+    BytesView wildcard_view = BytesView {
+        data: wildcard_target as usize,
+        length: 19
+    };
+    auto wildcard_result = http_router::router::resolve(
+        &router,
+        Method::Get,
+        wildcard_view,
+        params as usize,
+        8,
+    );
+    match wildcard_result {
+        Result<Match, RouterError>::Error(_) => {
+            return 7;
+        }
+        Result<Match, RouterError>::Ok(found) => {
+            wildcard_match = found;
+        }
+    }
+    if (!wildcard_match.matched || wildcard_match.handler_id != 30 || params[0].value.length != 11) {
+        return 7;
+    }
+
+    u8 post_method[4] = [80, 79, 83, 84];
+
+    if (http_router::router::method_from_bytes(BytesView {
+        data: post_method as usize,
+        length: 4
+    }
+    ) != Method::Post) {
+        return 8;
+    }
+
+    auto head_result = http_router::router::resolve(&router, Method::Head, static_view, params as usize, 8);
+
+    match head_result {
+        Result<Match, RouterError>::Error(_) => {
+            return 9;
+        }
+        Result<Match, RouterError>::Ok(found) => {
+            if (!found.matched || found.handler_id != 11) {
+                return 10;
+            }
+        }
+    }
+
+    u64 methods = http_router::router::allowed_methods(&router, static_view);
+
+    if ((methods & http_router::router::method_mask(Method::Get)) == 0) {
+        return 11;
+    }
+    if ((methods & http_router::router::method_mask(Method::Head)) == 0) {
+        return 12;
+    }
+
+    u8 id_name[2] = [105, 100];
+
+    auto named = http_router::router::find_param(params as usize, parameter_match.parameter_count, BytesView {
+        data: id_name as usize,
+        length: 2
+    }, );
+    if (named == 0 as Param*const) {
+        return 13;
+    }
+
+    u8 invalid_wildcard[10] = [47, 42, 112, 97, 116, 104, 47, 109, 111, 114];
+
+    auto invalid_result = http_router::router::add(
+        &mut router,
+        Method::Get,
+        invalid_wildcard as usize,
+        10,
+        99,
+        -1,
+    );
+    match invalid_result {
+        Result<i64, RouterError>::Ok(_) => {
+            return 14;
+        }
+        Result<i64, RouterError>::Error(_) => {}
+    }
+    return 0;
+}

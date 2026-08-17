@@ -1,0 +1,14 @@
+{
+  "archive": "packages/postgres/0.3.0.dpk",
+  "checksum": "04a23207c8931529",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/postgres/0.3.0.dpk",
+  "metadata": {
+    "description": "Native PostgreSQL wire-protocol client for Raz."
+  },
+  "name": "postgres",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.3.0",
+  "yanked": false
+}

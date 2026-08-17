@@ -1,0 +1,22 @@
+{
+  "name": "websocket",
+  "owners": [
+    "raz-language"
+  ],
+  "versions": [
+    {
+      "archive": "packages/websocket/0.2.0.dpk",
+      "checksum": "f39fda7ace69ad43",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/websocket/0.2.0.dpk",
+      "metadata": {
+        "description": "RFC 6455 WebSocket protocol primitives for Raz."
+      },
+      "name": "websocket",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.2.0",
+      "yanked": false
+    }
+  ]
+}

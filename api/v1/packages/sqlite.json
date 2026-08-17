@@ -1,0 +1,36 @@
+{
+  "name": "sqlite",
+  "owners": [
+    "raz-language"
+  ],
+  "versions": [
+    {
+      "archive": "packages/sqlite/0.2.0.dpk",
+      "checksum": "1d7b0d4385aa16ee",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/sqlite/0.2.0.dpk",
+      "metadata": {
+        "description": "Native SQLite integration for Raz with an allocation-conscious Raz API over SQLite's stable C ABI."
+      },
+      "name": "sqlite",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.2.0",
+      "yanked": false
+    },
+    {
+      "archive": "packages/sqlite/0.3.0.dpk",
+      "checksum": "aa227f45bc4bab2a",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/sqlite/0.3.0.dpk",
+      "metadata": {
+        "description": "Native SQLite integration for Raz with an allocation-conscious Raz API over SQLite's stable C ABI."
+      },
+      "name": "sqlite",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.3.0",
+      "yanked": false
+    }
+  ]
+}

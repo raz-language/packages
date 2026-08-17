@@ -1,0 +1,14 @@
+{
+  "archive": "packages/http-router/0.2.0.dpk",
+  "checksum": "855c18e6062f3892",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/http-router/0.2.0.dpk",
+  "metadata": {
+    "description": "High-performance, allocation-conscious HTTP routing for Raz."
+  },
+  "name": "http-router",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.2.0",
+  "yanked": false
+}

@@ -1,0 +1,50 @@
+name: Registry Admin
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Registry metadata action
+        required: true
+        type: choice
+        options: [owner-add, owner-remove, yank, unyank]
+      package:
+        description: Package name
+        required: true
+        type: string
+      value:
+        description: GitHub owner or package version
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply registry metadata change
+        run: python scripts/registry_admin.py "${{ inputs.action }}" "${{ inputs.package }}" "${{ inputs.value }}"
+      - name: Regenerate registry views
+        run: |
+          python scripts/generate_index.py
+          python scripts/generate_api.py
+          python scripts/generate_search.py
+          python scripts/validate_registry.py
+      - name: Commit registry metadata
+        shell: bash
+        run: |
+          if git diff --quiet -- metadata index.txt search.txt api/v1; then
+            echo "No registry metadata change."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add metadata index.txt search.txt api/v1
+          git commit -m "registry: ${{ inputs.action }} ${{ inputs.package }} ${{ inputs.value }}"
+          git push

@@ -1,85 +1,46 @@
 # Raz Package Registry
 
-`raz-language/packages` is the canonical package registry for the [Raz programming language](https://github.com/raz-language/raz), and the home of the official package implementations.
+`raz-language/packages` is the canonical package registry for the [Raz programming language](https://github.com/raz-language/raz).
 
-The registry is intentionally GitHub-backed. There is no registry server and no database: immutable, deterministic Raz package archives live under `packages/`, and `index.txt` is generated from those archives. Cloning this repository gives you the entire registry.
+The registry is intentionally GitHub-backed. There is no Raz registry server or database: immutable deterministic Raz package archives live under `packages/`, `index.txt` is the generated resolver projection, `search.txt` is the generated discovery projection, and `api/v1/` is a generated static registry API served directly by GitHub.
 
-## Using packages
-
-The Raz toolchain resolves from this repository by default, so a normal project needs no configuration:
+## Layout
 
 ```text
-raz search crypto
-raz info crypto
-raz add crypto
-raz add serde@^0.2.0
+index.txt
+packages/
+  <name>/
+    <version>.dpk
+```
+
+The Raz toolchain uses this repository by default. A normal project can install packages with:
+
+```text
+raz add json
+raz add json@^1.2.0
 raz update
 ```
 
-Dependencies are recorded in `raz.toml` as version constraints and pinned exactly in `raz.lock`. Archives are integrity-checked against the index checksum and stored in a shared content-addressed cache, so `build`, `check`, `run`, and `test` hydrate missing locked packages automatically — a clean checkout needs no separate install step.
+`RAZ_REGISTRY_URL` can still override the official registry for private registries, mirrors, and tests.
 
-`RAZ_REGISTRY_URL` overrides the official registry for private registries, mirrors, and tests. See [Package management](https://github.com/raz-language/raz/blob/main/docs/PACKAGE-MANAGEMENT.md).
+## Source code
 
-## Available packages
+The editable source for the official packages is kept in [`sources/`](sources/). The registry contract remains unchanged: only deterministic, immutable releases under `packages/<name>/<version>.dpk` are installable registry artifacts.
 
-| Package | Latest | Description |
-|---|---|---|
-| [`crypto`](sources/crypto) | 0.4.0 | SHA-2/SHA-3/BLAKE3, HMAC, Poly1305, ChaCha20-Poly1305, X25519, Ed25519, HKDF, secure random |
-| [`serde`](sources/serde) | 0.2.0 | Serialization and deserialization contracts |
-| [`toml`](sources/toml) | 0.2.0 | TOML parser and document model |
-| [`regex`](sources/regex) | 0.2.0 | Thompson/Pike NFA regular-expression engine |
-| [`uuid`](sources/uuid) | 0.2.0 | RFC 9562 UUID v4 and v7 |
-| [`semver`](sources/semver) | 0.2.0 | Semantic-version parser and requirement engine |
-| [`datetime`](sources/datetime) | 0.2.0 | Civil time, timestamps, durations, UTC offsets, RFC 3339 |
-| [`websocket`](sources/websocket) | 0.2.0 | RFC 6455 protocol core |
-| [`http-router`](sources/http-router) | 0.2.0 | Compiled, allocation-conscious HTTP router |
-| [`sqlite`](sources/sqlite) | 0.3.0 | Connections, statements, and transactions over the `sqlite3` ABI |
-| [`postgres`](sources/postgres) | 0.3.0 | PostgreSQL wire-protocol client with auth, TLS, and connection pooling |
+This keeps the repository useful both as the canonical GitHub-backed registry and as the home of the official package implementations.
 
-Packages under active development that have not been published yet: `jwt`, `multipart`, `archive`, and `testing`. Every published version, including superseded ones, remains available and is listed in [`index.txt`](index.txt); [`sources/PACKAGES.md`](sources/PACKAGES.md) tracks status and future candidates.
+## Static registry API
 
-## Repository layout
+GitHub itself serves the official registry API. The generated endpoints are normal versioned repository files:
 
 ```text
-index.txt              generated registry index — one line per published version
-packages/              published archives: packages/<name>/<version>.dpk
-sources/               editable source workspace for the official packages
-schema/registry-v1.md  the index and archive contract
-scripts/               index generation and registry validation
+search.txt
+api/v1/index.json
+api/v1/packages/<name>.json
+api/v1/packages/<name>/<version>.json
 ```
 
-Two directories look similar and are not interchangeable:
-
-- **`packages/`** is the registry. Only `packages/<name>/<version>.dpk` archives are installable, and once a path has appeared on `main` it is immutable.
-- **`sources/`** is where those packages are developed. It is a single Raz workspace (`sources/raz.toml`) covering every official package, so workspace-aware commands operate across all of them.
-
-```text
-cd sources
-raz check --workspace
-raz test --workspace
-```
-
-Source changes are developed and tested in `sources/`, assigned a new semantic version, and then published as a new deterministic archive under `packages/`.
-
-## The index
-
-`index.txt` is UTF-8 text with one whitespace-separated record per published version:
-
-```text
-<name> <version> <archive-path> <tree-checksum> [key-id signature]
-```
-
-```text
-crypto 0.4.0 packages/crypto/0.4.0.dpk 29c5d0340794fcfe
-```
-
-The checksum is the 64-bit FNV-1a hash Raz computes over every package file in sorted relative-path order, which is what makes installs verifiable and builds reproducible. The index is **generated** — never hand-edit it. Regenerate with:
-
-```bash
-python scripts/generate_index.py
-```
-
-The full contract, including the `RAZPKG1` archive format, is specified in [schema/registry-v1.md](schema/registry-v1.md).
+`index.txt` remains the dependency-resolution hot path, while `search.txt` provides package name/latest version/owners/description for rich CLI search. Tooling, websites, IDEs, and future clients can consume the JSON API without a dedicated service. Both representations are generated from the same immutable `.dpk` archives.
 
 ## Publishing
 
@@ -89,18 +50,47 @@ From a Raz package directory:
 raz publish
 ```
 
-Without an explicit private registry URL, this creates a repository-shaped submission under `.raz-publish/` containing `packages/<name>/<version>.dpk`. Copy that archive to the same path in this repository, regenerate the index, validate, and open a pull request:
+For maintainers or automation, set `GITHUB_TOKEN` (or `RAZ_REGISTRY_TOKEN`) to a token with contents write access to `raz-language/packages`. Raz uploads the immutable `packages/<name>/<version>.dpk` directly through GitHub; the registry workflow regenerates `index.txt` and `api/v1/`.
 
-```bash
-python scripts/generate_index.py && python scripts/validate_registry.py
+Without GitHub write credentials, the exact same command creates a repository-shaped submission under `.raz-publish/`. That directory can be copied into a fork/checkout and submitted as a pull request, so ordinary package authors do not need registry-server credentials.
+
+Published versions are immutable. Once `packages/foo/1.2.0.dpk` exists on `main`, changes must be released as a new version such as `1.2.1`.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for publication rules and [schema/registry-v1.md](schema/registry-v1.md) for the index/archive contract.
+
+## Registry policy metadata
+
+Package ownership and yank state live separately from immutable archives:
+
+```text
+metadata/<name>.json
 ```
 
-Published versions are immutable. Once `packages/foo/1.2.0.dpk` exists on `main`, a correction must ship as a new version such as `1.2.1`.
+Example:
 
-CI on every pull request verifies that no existing `.dpk` path was modified or deleted, that `index.txt` exactly matches the archives in `packages/`, and that archive syntax, manifest identity, and deterministic tree checksums all agree.
+```json
+{
+  "name": "crypto",
+  "owners": ["raz-language"],
+  "yanked": []
+}
+```
 
-Full rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Yanking never deletes or modifies a `.dpk`. The version is removed from the generated resolver `index.txt` while remaining visible in `api/v1/` with `"yanked": true`, so existing lockfiles stay reproducible.
 
-## License
+Maintainers can update this state with `scripts/registry_admin.py`; all changes still flow through ordinary GitHub commits/pull requests.
 
-The official packages are licensed under the [Apache License 2.0](LICENSE).
+
+## Registry administration
+
+The Raz CLI can inspect and queue registry policy changes directly through GitHub:
+
+```text
+raz registry status
+raz registry owner-add <package> <github-user>
+raz registry owner-remove <package> <github-user>
+raz registry yank <package> <version>
+raz registry unyank <package> <version>
+```
+
+The authenticated mutation commands dispatch `.github/workflows/registry-admin.yml`. That workflow applies the metadata change, regenerates `index.txt`, `search.txt`, and `api/v1/`, validates the registry, and commits the generated metadata. This keeps registry administration in GitHub's auditable repository/workflow model with no Raz-operated server.

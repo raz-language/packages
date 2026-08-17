@@ -1,0 +1,22 @@
+{
+  "name": "toml",
+  "owners": [
+    "raz-language"
+  ],
+  "versions": [
+    {
+      "archive": "packages/toml/0.2.0.dpk",
+      "checksum": "742c52a8136206bf",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/toml/0.2.0.dpk",
+      "metadata": {
+        "description": "Native TOML parsing for Raz, designed around source-backed documents and low allocation overhead."
+      },
+      "name": "toml",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.2.0",
+      "yanked": false
+    }
+  ]
+}

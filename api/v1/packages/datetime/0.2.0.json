@@ -1,0 +1,14 @@
+{
+  "archive": "packages/datetime/0.2.0.dpk",
+  "checksum": "7ac713492ee461a1",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/datetime/0.2.0.dpk",
+  "metadata": {
+    "description": "High-performance civil date/time, UTC offset, duration, Unix timestamp, and RFC 3339 utilities for Raz."
+  },
+  "name": "datetime",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.2.0",
+  "yanked": false
+}

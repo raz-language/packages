@@ -1,0 +1,14 @@
+{
+  "archive": "packages/crypto/0.2.0.dpk",
+  "checksum": "4b3d8ee62066fa71",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/crypto/0.2.0.dpk",
+  "metadata": {
+    "description": "Native cryptographic primitives and secure utilities for Raz."
+  },
+  "name": "crypto",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.2.0",
+  "yanked": false
+}

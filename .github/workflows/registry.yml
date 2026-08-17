@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -31,7 +31,30 @@ jobs:
               exit 1
             fi
           fi
-      - name: Verify generated index
-        run: python scripts/generate_index.py --check
+      - name: Generate registry index and static API
+        if: github.event_name == 'push'
+        run: |
+          python scripts/generate_index.py
+          python scripts/generate_api.py
+          python scripts/generate_search.py
+      - name: Verify generated registry files
+        if: github.event_name == 'pull_request'
+        run: |
+          python scripts/generate_index.py --check
+          python scripts/generate_api.py --check
+          python scripts/generate_search.py --check
       - name: Validate registry
         run: python scripts/validate_registry.py
+      - name: Commit generated registry files
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if git diff --quiet -- index.txt search.txt api/v1; then
+            echo "Registry metadata is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.txt search.txt api/v1
+          git commit -m "registry: refresh generated index and API"
+          git push

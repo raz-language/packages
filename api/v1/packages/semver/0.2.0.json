@@ -1,0 +1,14 @@
+{
+  "archive": "packages/semver/0.2.0.dpk",
+  "checksum": "fd58f9d6c9c7552a",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/semver/0.2.0.dpk",
+  "metadata": {
+    "description": "Strict Semantic Versioning 2.0.0 parsing, precedence, and package-manager version requirements for Raz."
+  },
+  "name": "semver",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.2.0",
+  "yanked": false
+}

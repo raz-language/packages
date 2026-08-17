@@ -1,0 +1,14 @@
+{
+  "archive": "packages/uuid/0.2.0.dpk",
+  "checksum": "df3d25063958427c",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/uuid/0.2.0.dpk",
+  "metadata": {
+    "description": "Fast UUID primitives for Raz."
+  },
+  "name": "uuid",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.2.0",
+  "yanked": false
+}

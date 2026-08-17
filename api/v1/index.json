@@ -1,0 +1,142 @@
+{
+  "packages": [
+    {
+      "description": "Cryptographic primitives and secure utilities for Raz.",
+      "latest": "0.4.0",
+      "license": "",
+      "name": "crypto",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0",
+        "0.3.0",
+        "0.4.0"
+      ]
+    },
+    {
+      "description": "High-performance civil date/time, UTC offset, duration, Unix timestamp, and RFC 3339 utilities for Raz.",
+      "latest": "0.2.0",
+      "license": "",
+      "name": "datetime",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0"
+      ]
+    },
+    {
+      "description": "High-performance, allocation-conscious HTTP routing for Raz.",
+      "latest": "0.2.0",
+      "license": "",
+      "name": "http-router",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0"
+      ]
+    },
+    {
+      "description": "Native PostgreSQL wire-protocol client for Raz.",
+      "latest": "0.3.0",
+      "license": "",
+      "name": "postgres",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0",
+        "0.3.0"
+      ]
+    },
+    {
+      "description": "`regex` is the official allocation-conscious regular-expression package for Raz.",
+      "latest": "0.2.0",
+      "license": "",
+      "name": "regex",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0"
+      ]
+    },
+    {
+      "description": "Strict Semantic Versioning 2.0.0 parsing, precedence, and package-manager version requirements for Raz.",
+      "latest": "0.2.0",
+      "license": "",
+      "name": "semver",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0"
+      ]
+    },
+    {
+      "description": "`serde` defines Raz's format-neutral serialization contracts.",
+      "latest": "0.2.0",
+      "license": "",
+      "name": "serde",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0"
+      ]
+    },
+    {
+      "description": "Native SQLite integration for Raz with an allocation-conscious Raz API over SQLite's stable C ABI.",
+      "latest": "0.3.0",
+      "license": "",
+      "name": "sqlite",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0",
+        "0.3.0"
+      ]
+    },
+    {
+      "description": "Native TOML parsing for Raz, designed around source-backed documents and low allocation overhead.",
+      "latest": "0.2.0",
+      "license": "",
+      "name": "toml",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0"
+      ]
+    },
+    {
+      "description": "Fast UUID primitives for Raz.",
+      "latest": "0.2.0",
+      "license": "",
+      "name": "uuid",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0"
+      ]
+    },
+    {
+      "description": "RFC 6455 WebSocket protocol primitives for Raz.",
+      "latest": "0.2.0",
+      "license": "",
+      "name": "websocket",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.2.0"
+      ]
+    }
+  ],
+  "registry": "raz-language/packages",
+  "schema": "raz-registry-v1"
+}

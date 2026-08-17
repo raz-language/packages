@@ -1,0 +1,22 @@
+{
+  "name": "serde",
+  "owners": [
+    "raz-language"
+  ],
+  "versions": [
+    {
+      "archive": "packages/serde/0.2.0.dpk",
+      "checksum": "60f152b9397fe2d3",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/serde/0.2.0.dpk",
+      "metadata": {
+        "description": "`serde` defines Raz's format-neutral serialization contracts."
+      },
+      "name": "serde",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.2.0",
+      "yanked": false
+    }
+  ]
+}

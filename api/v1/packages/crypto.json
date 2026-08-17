@@ -1,0 +1,50 @@
+{
+  "name": "crypto",
+  "owners": [
+    "raz-language"
+  ],
+  "versions": [
+    {
+      "archive": "packages/crypto/0.2.0.dpk",
+      "checksum": "4b3d8ee62066fa71",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/crypto/0.2.0.dpk",
+      "metadata": {
+        "description": "Native cryptographic primitives and secure utilities for Raz."
+      },
+      "name": "crypto",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.2.0",
+      "yanked": false
+    },
+    {
+      "archive": "packages/crypto/0.3.0.dpk",
+      "checksum": "1df2e1c031b738e3",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/crypto/0.3.0.dpk",
+      "metadata": {
+        "description": "Native cryptographic primitives and secure utilities for Raz."
+      },
+      "name": "crypto",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.3.0",
+      "yanked": false
+    },
+    {
+      "archive": "packages/crypto/0.4.0.dpk",
+      "checksum": "29c5d0340794fcfe",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/crypto/0.4.0.dpk",
+      "metadata": {
+        "description": "Cryptographic primitives and secure utilities for Raz."
+      },
+      "name": "crypto",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.4.0",
+      "yanked": false
+    }
+  ]
+}

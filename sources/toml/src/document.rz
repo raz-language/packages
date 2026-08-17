@@ -5,6 +5,7 @@ namespace toml::document;
 import alloc::string;
 import alloc::vec;
 import core::bytes;
+
 /// Classification of a TOML value. String and date/time values remain borrowed
 /// source slices; consumers can decode them only when ownership is required.
 public enum TomlValueKind {

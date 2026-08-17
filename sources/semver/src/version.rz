@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace semver::version;
+
 /// A strict SemVer 2.0.0 version view. Prerelease and build metadata remain
 /// borrowed slices of the input bytes, so parsing itself performs no allocation.
 public struct Version {

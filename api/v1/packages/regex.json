@@ -17,6 +17,20 @@
       ],
       "version": "0.2.0",
       "yanked": false
+    },
+    {
+      "archive": "packages/regex/0.2.1.dpk",
+      "checksum": "101bc294f86aee7e",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/regex/0.2.1.dpk",
+      "metadata": {
+        "description": "`regex` is the official allocation-conscious regular-expression package for Raz."
+      },
+      "name": "regex",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.2.1",
+      "yanked": false
     }
   ]
 }

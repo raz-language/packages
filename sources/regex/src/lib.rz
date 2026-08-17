@@ -2,9 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace regex;
+
 public import regex::program;
 public import regex::engine;
 
-public fn version_major() -> i64 { return 0; }
-public fn version_minor() -> i64 { return 2; }
-public fn version_patch() -> i64 { return 0; }
+public fn version_major() -> i64 {
+    return 0;
+}
+
+public fn version_minor() -> i64 {
+    return 2;
+}
+
+public fn version_patch() -> i64 {
+    return 1;
+}

@@ -46,15 +46,21 @@ struct Fragment {
 }
 
 fn byte_at(usize data, i64 index) -> u8 {
-    unsafe { return *((data + index)as u8*const); }
+    unsafe {
+        return *((data + index)as u8*const);
+    }
 }
 
 fn word_at(usize data, i64 index) -> i64 {
-    unsafe { return *(((data + index * 8))as i64*const); }
+    unsafe {
+        return *(((data + index * 8))as i64*const);
+    }
 }
 
 fn set_word(usize data, i64 index, i64 value) {
-    unsafe { *(((data + index * 8))as i64*mut) = value; }
+    unsafe {
+        *(((data + index * 8))as i64*mut) = value;
+    }
 }
 
 fn inst_word(i64 instruction, i64 field) -> i64 {
@@ -68,12 +74,18 @@ fn patch_base(Parser& parser, i64 patch) -> i64 {
 fn space_ok(Parser& parser, i64 extra_instructions, i64 extra_patches) -> bool {
     i64 low = (parser.instruction_count + extra_instructions) * WORDS_PER_INSTRUCTION;
     i64 high = parser.capacity_words - (parser.patch_count + extra_patches) * 3;
+
     return low <= high && parser.instruction_count + extra_instructions <= MAX_INSTRUCTIONS;
 }
 
 fn emit(Parser&mut parser, i64 op, i64 a, i64 b, i64 out1, i64 out2) -> i64 {
-    if (!space_ok(parser, 1, 0)) { parser.failed = true; return -1; }
+    if (!space_ok(parser, 1, 0)) {
+        parser.failed = true;
+        return -1;
+    }
+
     i64 pc = parser.instruction_count;
+
     parser.instruction_count += 1;
     set_word(parser.program, inst_word(pc, 0), op);
     set_word(parser.program, inst_word(pc, 1), a);
@@ -84,64 +96,116 @@ fn emit(Parser&mut parser, i64 op, i64 a, i64 b, i64 out1, i64 out2) -> i64 {
 }
 
 fn new_patch(Parser&mut parser, i64 instruction, i64 slot) -> i64 {
-    if (!space_ok(parser, 0, 1)) { parser.failed = true; return -1; }
+    if (!space_ok(parser, 0, 1)) {
+        parser.failed = true;
+        return -1;
+    }
+
     i64 patch = parser.patch_count;
+
     parser.patch_count += 1;
+
     i64 base = patch_base(parser, patch);
+
     set_word(parser.program, base + 0, instruction);
     set_word(parser.program, base + 1, slot);
     set_word(parser.program, base + 2, -1);
     return patch;
 }
 
-fn patch_next(Parser& parser, i64 patch) -> i64 { return word_at(parser.program, patch_base(parser, patch) + 2); }
-fn set_patch_next(Parser&mut parser, i64 patch, i64 next) { set_word(parser.program, patch_base(parser, patch) + 2, next); }
+fn patch_next(Parser& parser, i64 patch) -> i64 {
+    return word_at(parser.program, patch_base(parser, patch) + 2);
+}
+
+fn set_patch_next(Parser&mut parser, i64 patch, i64 next) {
+    set_word(parser.program, patch_base(parser, patch) + 2, next);
+}
 
 fn patch_all(Parser&mut parser, i64 head, i64 target) {
     i64 current = head;
+
     while (current >= 0) {
         i64 base = patch_base(parser, current);
         i64 instruction = word_at(parser.program, base + 0);
         i64 slot = word_at(parser.program, base + 1);
         i64 field = 4;
-        if (slot == 1) { field = 3; }
+
+        if (slot == 1) {
+            field = 3;
+        }
         set_word(parser.program, inst_word(instruction, field), target);
         current = word_at(parser.program, base + 2);
     }
 }
 
 fn append_lists(Parser&mut parser, Fragment&mut left, Fragment& right) {
-    if (left.patch_head < 0) { left.patch_head = right.patch_head; left.patch_tail = right.patch_tail; return; }
-    if (right.patch_head < 0) { return; }
+    if (left.patch_head < 0) {
+        left.patch_head = right.patch_head;
+        left.patch_tail = right.patch_tail;
+        return;
+    }
+    if (right.patch_head < 0) {
+        return;
+    }
     set_patch_next(parser, left.patch_tail, right.patch_head);
     left.patch_tail = right.patch_tail;
 }
 
-fn single(i64 start, i64 patch) -> Fragment { return Fragment { start: start, patch_head: patch, patch_tail: patch }; }
-fn empty_fragment() -> Fragment { return Fragment { start: -1, patch_head: -1, patch_tail: -1 }; }
+fn single(i64 start, i64 patch) -> Fragment {
+    return Fragment {
+        start: start,
+        patch_head: patch,
+        patch_tail: patch
+    };
+}
+
+fn empty_fragment() -> Fragment {
+    return Fragment {
+        start: -1,
+        patch_head: -1,
+        patch_tail: -1
+    };
+}
 
 fn escaped_byte(u8 value) -> u8 {
-    if (value == 110) { return 10; }
-    if (value == 114) { return 13; }
-    if (value == 116) { return 9; }
+    if (value == 110) {
+        return 10;
+    }
+    if (value == 114) {
+        return 13;
+    }
+    if (value == 116) {
+        return 9;
+    }
     return value;
 }
 
 fn parse_class(Parser&mut parser) -> Fragment {
     i64 begin = parser.cursor;
     bool escaped = false;
+
     while (parser.cursor < parser.length) {
         u8 value = byte_at(parser.pattern, parser.cursor);
+
         if (!escaped && value == 93) {
             i64 end = parser.cursor;
+
             parser.cursor += 1;
-            if (end <= begin) { parser.failed = true; return empty_fragment(); }
+            if (end <= begin) {
+                parser.failed = true;
+                return empty_fragment();
+            }
+
             i64 pc = emit(parser, OP_CLASS, begin, end, -1, -1);
             i64 patch = new_patch(parser, pc, 1);
+
             return single(pc, patch);
         }
-        if (!escaped && value == 92) { escaped = true; }
-        else { escaped = false; }
+        if (!escaped && value == 92) {
+            escaped = true;
+        } else {
+            escaped = false;
+        }
         parser.cursor += 1;
     }
     parser.failed = true;
@@ -149,28 +213,44 @@ fn parse_class(Parser&mut parser) -> Fragment {
 }
 
 fn parse_atom(Parser&mut parser) -> Fragment {
-    if (parser.cursor >= parser.length) { parser.failed = true; return empty_fragment(); }
+    if (parser.cursor >= parser.length) {
+        parser.failed = true;
+        return empty_fragment();
+    }
+
     u8 value = byte_at(parser.pattern, parser.cursor);
+
     if (value == 40) {
         parser.cursor += 1;
+
         Fragment inner = parse_expression(parser);
-        if (parser.cursor >= parser.length || byte_at(parser.pattern, parser.cursor) != 41) { parser.failed = true; return inner; }
+
+        if (parser.cursor >= parser.length || byte_at(parser.pattern, parser.cursor) != 41) {
+            parser.failed = true;
+            return inner;
+        }
         parser.cursor += 1;
         return inner;
     }
     if (value == 46) {
         parser.cursor += 1;
+
         i64 pc = emit(parser, OP_ANY, 0, 0, -1, -1);
+
         return single(pc, new_patch(parser, pc, 1));
     }
     if (value == 94) {
         parser.cursor += 1;
+
         i64 pc = emit(parser, OP_BOL, 0, 0, -1, -1);
+
         return single(pc, new_patch(parser, pc, 1));
     }
     if (value == 36) {
         parser.cursor += 1;
+
         i64 pc = emit(parser, OP_EOL, 0, 0, -1, -1);
+
         return single(pc, new_patch(parser, pc, 1));
     }
     if (value == 91) {
@@ -179,39 +259,68 @@ fn parse_atom(Parser&mut parser) -> Fragment {
     }
     if (value == 92) {
         parser.cursor += 1;
-        if (parser.cursor >= parser.length) { parser.failed = true; return empty_fragment(); }
+        if (parser.cursor >= parser.length) {
+            parser.failed = true;
+            return empty_fragment();
+        }
         value = escaped_byte(byte_at(parser.pattern, parser.cursor));
         parser.cursor += 1;
     } else {
-        if (value == 41 || value == 124 || value == 42 || value == 43 || value == 63) { parser.failed = true; return empty_fragment(); }
+        if (value == 41 || value == 124 || value == 42 || value == 43 || value == 63) {
+            parser.failed = true;
+            return empty_fragment();
+        }
         parser.cursor += 1;
     }
+
     i64 pc = emit(parser, OP_CHAR, value as i64, 0, -1, -1);
+
     return single(pc, new_patch(parser, pc, 1));
 }
 
 fn parse_repeat(Parser&mut parser) -> Fragment {
     Fragment atom = parse_atom(parser);
-    if (parser.failed || parser.cursor >= parser.length) { return atom; }
+
+    if (parser.failed || parser.cursor >= parser.length) {
+        return atom;
+    }
+
     u8 quantifier = byte_at(parser.pattern, parser.cursor);
-    if (quantifier != 42 && quantifier != 43 && quantifier != 63) { return atom; }
+
+    if (quantifier != 42 && quantifier != 43 && quantifier != 63) {
+        return atom;
+    }
     parser.cursor += 1;
     if (quantifier == 42) {
         i64 split = emit(parser, OP_SPLIT, 0, 0, atom.start, -1);
+
         patch_all(parser, atom.patch_head, split);
+
         i64 dangling = new_patch(parser, split, 2);
+
         return single(split, dangling);
     }
     if (quantifier == 43) {
         i64 split = emit(parser, OP_SPLIT, 0, 0, atom.start, -1);
+
         patch_all(parser, atom.patch_head, split);
+
         i64 dangling = new_patch(parser, split, 2);
+
         return single(atom.start, dangling);
     }
+
     i64 split = emit(parser, OP_SPLIT, 0, 0, atom.start, -1);
     i64 dangling = new_patch(parser, split, 2);
-    Fragment result = Fragment { start: split, patch_head: atom.patch_head, patch_tail: atom.patch_tail };
+
+    Fragment result = Fragment {
+        start: split,
+        patch_head: atom.patch_head,
+        patch_tail: atom.patch_tail
+    };
+
     Fragment extra = single(split, dangling);
+
     append_lists(parser, &mut result, &extra);
     return result;
 }
@@ -219,16 +328,31 @@ fn parse_repeat(Parser&mut parser) -> Fragment {
 fn parse_concat(Parser&mut parser) -> Fragment {
     Fragment result = empty_fragment();
     bool have = false;
+
     while (parser.cursor < parser.length) {
         u8 value = byte_at(parser.pattern, parser.cursor);
-        if (value == 41 || value == 124) { break; }
+
+        if (value == 41 || value == 124) {
+            break;
+        }
+
         Fragment next = parse_repeat(parser);
-        if (parser.failed) { return result; }
-        if (!have) { result = next; have = true; }
-        else { patch_all(parser, result.patch_head, next.start); result.patch_head = next.patch_head; result.patch_tail = next.patch_tail; }
+
+        if (parser.failed) {
+            return result;
+        }
+        if (!have) {
+            result = next;
+            have = true;
+        } else {
+            patch_all(parser, result.patch_head, next.start);
+            result.patch_head = next.patch_head;
+            result.patch_tail = next.patch_tail;
+        }
     }
     if (!have) {
         i64 split = emit(parser, OP_SPLIT, 0, 0, -1, -1);
+
         result = single(split, new_patch(parser, split, 1));
     }
     return result;
@@ -236,11 +360,18 @@ fn parse_concat(Parser&mut parser) -> Fragment {
 
 fn parse_expression(Parser&mut parser) -> Fragment {
     Fragment left = parse_concat(parser);
+
     while (!parser.failed && parser.cursor < parser.length && byte_at(parser.pattern, parser.cursor) == 124) {
         parser.cursor += 1;
+
         Fragment right = parse_concat(parser);
         i64 split = emit(parser, OP_SPLIT, 0, 0, left.start, right.start);
-        Fragment merged = Fragment { start: split, patch_head: left.patch_head, patch_tail: left.patch_tail };
+
+        Fragment merged = Fragment {
+            start: split,
+            patch_head: left.patch_head,
+            patch_tail: left.patch_tail
+        };
         append_lists(parser, &mut merged, &right);
         left = merged;
     }
@@ -249,14 +380,39 @@ fn parse_expression(Parser&mut parser) -> Fragment {
 
 /// Compile a byte-oriented regular expression into caller-owned storage.
 /// Storage must remain alive for the lifetime of the Regex value.
-public fn compile(usize pattern, i64 pattern_length, usize storage, i64 storage_words, Regex&mut output) -> bool {
-    if (pattern == 0 || storage == 0 || pattern_length <= 0 || storage_words < 64) { return false; }
-    Parser parser = Parser { pattern: pattern, length: pattern_length, cursor: 0, program: storage, capacity_words: storage_words, instruction_count: 0, patch_count: 0, failed: false };
+public fn compile(
+    usize pattern,
+    i64 pattern_length,
+    usize storage,
+    i64 storage_words,
+    Regex&mut output
+) -> bool {
+    if (pattern == 0 || storage == 0 || pattern_length <= 0 || storage_words < 64) {
+        return false;
+    }
+    Parser parser = Parser {
+        pattern: pattern,
+        length: pattern_length,
+        cursor: 0,
+        program: storage,
+        capacity_words: storage_words,
+        instruction_count: 0,
+        patch_count: 0,
+        failed: false
+    };
+
     Fragment root = parse_expression(&mut parser);
-    if (parser.failed || parser.cursor != pattern_length) { return false; }
+
+    if (parser.failed || parser.cursor != pattern_length) {
+        return false;
+    }
+
     i64 finish = emit(&mut parser, OP_MATCH, 0, 0, -1, -1);
+
     patch_all(&mut parser, root.patch_head, finish);
-    if (parser.failed) { return false; }
+    if (parser.failed) {
+        return false;
+    }
     output.pattern = pattern;
     output.pattern_length = pattern_length;
     output.program = storage;
@@ -266,15 +422,50 @@ public fn compile(usize pattern, i64 pattern_length, usize storage, i64 storage_
     return true;
 }
 
-public fn instruction_op(Regex& regex, i64 pc) -> i64 { return word_at(regex.program, inst_word(pc, 0)); }
-public fn instruction_a(Regex& regex, i64 pc) -> i64 { return word_at(regex.program, inst_word(pc, 1)); }
-public fn instruction_b(Regex& regex, i64 pc) -> i64 { return word_at(regex.program, inst_word(pc, 2)); }
-public fn instruction_out1(Regex& regex, i64 pc) -> i64 { return word_at(regex.program, inst_word(pc, 3)); }
-public fn instruction_out2(Regex& regex, i64 pc) -> i64 { return word_at(regex.program, inst_word(pc, 4)); }
-public fn op_char() -> i64 { return OP_CHAR; }
-public fn op_any() -> i64 { return OP_ANY; }
-public fn op_class() -> i64 { return OP_CLASS; }
-public fn op_split() -> i64 { return OP_SPLIT; }
-public fn op_bol() -> i64 { return OP_BOL; }
-public fn op_eol() -> i64 { return OP_EOL; }
-public fn op_match() -> i64 { return OP_MATCH; }
+public fn instruction_op(Regex& regex, i64 pc) -> i64 {
+    return word_at(regex.program, inst_word(pc, 0));
+}
+
+public fn instruction_a(Regex& regex, i64 pc) -> i64 {
+    return word_at(regex.program, inst_word(pc, 1));
+}
+
+public fn instruction_b(Regex& regex, i64 pc) -> i64 {
+    return word_at(regex.program, inst_word(pc, 2));
+}
+
+public fn instruction_out1(Regex& regex, i64 pc) -> i64 {
+    return word_at(regex.program, inst_word(pc, 3));
+}
+
+public fn instruction_out2(Regex& regex, i64 pc) -> i64 {
+    return word_at(regex.program, inst_word(pc, 4));
+}
+
+public fn op_char() -> i64 {
+    return OP_CHAR;
+}
+
+public fn op_any() -> i64 {
+    return OP_ANY;
+}
+
+public fn op_class() -> i64 {
+    return OP_CLASS;
+}
+
+public fn op_split() -> i64 {
+    return OP_SPLIT;
+}
+
+public fn op_bol() -> i64 {
+    return OP_BOL;
+}
+
+public fn op_eol() -> i64 {
+    return OP_EOL;
+}
+
+public fn op_match() -> i64 {
+    return OP_MATCH;
+}

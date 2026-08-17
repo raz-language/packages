@@ -1,23 +1,46 @@
 // Copyright 2026 Mario Vinciguerra
 // SPDX-License-Identifier: Apache-2.0
 
-import regex;
+import regex::program;
+import regex::engine;
 
 fn main() -> i64 {
     i64 storage[2048];
     Regex compiled;
     u8 pattern[12] = [94, 40, 97, 124, 98, 41, 43, 91, 48, 45, 57, 93];
-    if (!regex::program::compile(pattern as usize, 12, storage as usize, 2048, &mut compiled)) { return 1; }
+
+    if (!regex::program::compile(&mut pattern[0]as usize, 12, &mut storage[0]as usize, 2048, &mut compiled)) {
+        return 1;
+    }
+
     u8 input[4] = [97, 98, 98, 7];
-    Match found = regex::engine::find(&compiled, input as usize, 3);
-    if (!found.matched || found.start != 0 || found.end != 3) { return 2; }
+    Match found = regex::engine::find(&compiled, &mut input[0]as usize, 3);
+
+    if (!found.matched || found.start != 0 || found.end != 3) {
+        return 2;
+    }
 
     i64 second_storage[1024];
     Regex second;
     u8 second_pattern[4] = [97, 42, 98, 36];
-    if (!regex::program::compile(second_pattern as usize, 4, second_storage as usize, 1024, &mut second)) { return 3; }
+
+    if (
+        !regex::program::compile(
+            &mut second_pattern[0]as usize,
+            4,
+            &mut second_storage[0]as usize,
+            1024,
+            &mut second
+        )
+    ) {
+        return 3;
+    }
+
     u8 second_input[5] = [120, 97, 97, 98, 0];
-    Match second_found = regex::engine::find(&second, second_input as usize, 4);
-    if (!second_found.matched || second_found.start != 1 || second_found.end != 4) { return 4; }
+    Match second_found = regex::engine::find(&second, &mut second_input[0]as usize, 4);
+
+    if (!second_found.matched || second_found.start != 1 || second_found.end != 4) {
+        return 4;
+    }
     return 0;
 }

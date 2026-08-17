@@ -53,14 +53,15 @@
     },
     {
       "description": "`regex` is the official allocation-conscious regular-expression package for Raz.",
-      "latest": "0.2.0",
+      "latest": "0.2.1",
       "license": "",
       "name": "regex",
       "owners": [
         "raz-language"
       ],
       "versions": [
-        "0.2.0"
+        "0.2.0",
+        "0.2.1"
       ]
     },
     {

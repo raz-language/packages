@@ -6,6 +6,7 @@ http-router 0.2.0 packages/http-router/0.2.0.dpk 855c18e6062f3892
 postgres 0.2.0 packages/postgres/0.2.0.dpk d477f8da171c0435
 postgres 0.3.0 packages/postgres/0.3.0.dpk 04a23207c8931529
 regex 0.2.0 packages/regex/0.2.0.dpk 5692e2b54eb5ee64
+regex 0.2.1 packages/regex/0.2.1.dpk 101bc294f86aee7e
 semver 0.2.0 packages/semver/0.2.0.dpk fd58f9d6c9c7552a
 serde 0.2.0 packages/serde/0.2.0.dpk 60f152b9397fe2d3
 sqlite 0.2.0 packages/sqlite/0.2.0.dpk 1d7b0d4385aa16ee

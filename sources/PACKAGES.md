@@ -11,8 +11,8 @@
 | 7 | `datetime` | **0.2.0 civil time, timestamps, durations, UTC offsets, and RFC 3339 implemented** |
 | 8 | `websocket` | **0.2.0 RFC 6455 protocol core implemented** |
 | 9 | `http-router` | **0.2.0 compiled allocation-conscious router implemented** |
-| 10 | `sqlite` | implemented (0.3.0) |
-| 11 | `postgres` | scaffold |
+| 10 | `sqlite` | **0.3.0 client implemented** |
+| 11 | `postgres` | **0.3.0 PostgreSQL v3 client implemented** |
 | 12 | `jwt` | scaffold |
 | 13 | `multipart` | scaffold |
 | 14 | `archive` | scaffold |

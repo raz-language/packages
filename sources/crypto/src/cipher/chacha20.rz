@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace crypto::cipher::chacha20;
+
 public const i64 KEY_SIZE = 32;
 public const i64 NONCE_SIZE = 12;
 public const i64 BLOCK_SIZE = 64;

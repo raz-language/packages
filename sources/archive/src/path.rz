@@ -1,0 +1,55 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace archive::path;
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+/// Validates an archive member name before extraction. Names are portable,
+/// relative, slash-separated paths without traversal components.
+public fn safe(usize data, i64 length) -> bool {
+    if (data == 0 || length <= 0 || length > 4096) {
+        return false;
+    }
+
+    i64 first = load(data);
+
+    if (first == 47 || first == 92) {
+        return false;
+    }
+
+    i64 start = 0;
+    i64 i = 0;
+
+    while (i <= length) {
+        if (i == length || load(data + i) == 47) {
+            i64 segment = i - start;
+
+            if (segment <= 0) {
+                // A single trailing slash is the directory marker.
+                return i == length && start == length;
+            }
+            if (segment == 1 && load(data + start) == 46) {
+                return false;
+            }
+            if (segment == 2 && load(data + start) == 46 && load(data + start + 1) == 46) {
+                return false;
+            }
+            start = i + 1;
+            i += 1;
+            continue;
+        }
+
+        i64 byte = load(data + i);
+
+        if (byte == 0 || byte == 92 || byte == 58 || byte < 32 || byte == 127) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}

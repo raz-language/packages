@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace serde::ser;
+
 import alloc::string;
 public import serde::error;
+
 // Format implementations provide this allocation-neutral event sink. Compound
 // values are emitted in order; formats may stream directly to an io::Write
 // adapter rather than building an intermediate tree.
@@ -22,18 +24,55 @@ public trait Serializer {
     fn end_map(Self&mut self) -> SerdeError;
 }
 
+// Keeps the object-safe interface independently type-checkable before a format
+// package contributes its concrete serializer implementation.
+struct UnsupportedSerializer {}
+
+impl Serializer for UnsupportedSerializer {
+    fn write_null(UnsupportedSerializer&mut self) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn write_bool(UnsupportedSerializer&mut self, bool value) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn write_i64(UnsupportedSerializer&mut self, i64 value) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn write_u64(UnsupportedSerializer&mut self, u64 value) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn write_f64(UnsupportedSerializer&mut self, f64 value) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn write_bytes(UnsupportedSerializer&mut self, usize data, i64 length) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn write_string(UnsupportedSerializer&mut self, usize data, i64 length) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn begin_sequence(UnsupportedSerializer&mut self, i64 length) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn end_sequence(UnsupportedSerializer&mut self) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn begin_map(UnsupportedSerializer&mut self, i64 length) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn write_key(UnsupportedSerializer&mut self, usize data, i64 length) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn end_map(UnsupportedSerializer&mut self) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+}
+
 public trait Serialize {
     fn serialize(Self& self, dyn Serializer serializer) -> SerdeError;
 }
 
 public fn encode<T: Serialize>(T& value, dyn Serializer serializer) -> SerdeError {
     return value.serialize(serializer);
-}
-
-impl Serialize for bool {
-    fn serialize(bool& self, dyn Serializer serializer) -> SerdeError {
-        return serializer.write_bool(*self);
-    }
 }
 
 impl Serialize for i64 {

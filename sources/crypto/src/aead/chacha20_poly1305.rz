@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace crypto::aead::chacha20_poly1305;
+
 import crypto::cipher::chacha20;
 import crypto::mac::poly1305;
 import crypto::secure;
+
 public const i64 KEY_SIZE = 32;
 public const i64 NONCE_SIZE = 12;
 public const i64 TAG_SIZE = 16;

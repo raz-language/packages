@@ -1,17 +1,10 @@
 # testing
 
-Extended testing, fixtures, parameterization, and property testing for Raz.
+Reusable assertions, deterministic property generators, shrinking, and benchmark statistics for Raz.
 
-> **Status:** initial package scaffold. The public API is not stable yet.
+Version 0.1.0 provides caller-buffered structured failures, case-index tracking for parameterized tests, scalar/byte assertions, unbiased deterministic ranges, byte generation and in-place shuffling, reproducible property-runner state, scalar shrinking, and Welford benchmark statistics.
 
-## Goals
-
-- [ ] assertion helpers
-- [ ] fixtures
-- [ ] parameterized cases
-- [ ] property generators
-- [ ] shrinking
-- [ ] benchmark-friendly test utilities
+The package deliberately does not own output or process termination. Test executables decide how to render recorded failures and which exit code to return.
 
 ## Dependencies
 
@@ -19,8 +12,6 @@ None.
 
 ## Design rules
 
-- Native Raz implementation wherever practical.
-- Explicit errors through `Result` for recoverable failures.
-- Avoid hidden allocations on hot paths.
-- Keep the public surface small and composable.
-- Add malformed/adversarial-input tests for parser, protocol, and security code.
+- Seeds and failing case indices are always available for reproduction.
+- Assertion failure storage is caller-owned and bounded.
+- Random generation is deterministic and is not presented as cryptographic randomness.

@@ -1,0 +1,30 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace msgpack::value;
+
+import core::bytes;
+
+public enum MsgpackKind {
+    Nil,
+    False,
+    True,
+    Unsigned,
+    Signed,
+    Float32,
+    Float64,
+    String,
+    Binary,
+    Array,
+    Map,
+}
+
+public struct MsgpackItem {
+    MsgpackKind kind;
+    u64 unsigned_value;
+    i64 signed_value;
+    u64 count;
+    BytesView payload;
+    i64 offset;
+    i64 header_length;
+}

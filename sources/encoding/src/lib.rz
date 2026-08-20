@@ -1,0 +1,21 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace encoding;
+
+public import encoding::hex;
+public import encoding::base64url;
+public import encoding::base32;
+public import encoding::checksum;
+
+public fn version_major() -> i64 {
+    return 0;
+}
+
+public fn version_minor() -> i64 {
+    return 1;
+}
+
+public fn version_patch() -> i64 {
+    return 0;
+}

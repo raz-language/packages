@@ -1,0 +1,20 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import json::writer;
+
+fn main() -> i64 {
+    JsonWriter writer = json::writer::create(64);
+    u8 key[2] = [111, 107];
+
+    if (!json::writer::begin_object(&mut writer)) {
+        return 1;
+    }
+    if (!json::writer::key(&mut writer, &key[0]as usize, 2)) {
+        return 2;
+    }
+    if (!json::writer::boolean(&mut writer, true) || !json::writer::end(&mut writer)) {
+        return 3;
+    }
+    return json::writer::complete(&writer)?0: 4;
+}

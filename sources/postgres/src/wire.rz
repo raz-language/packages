@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace postgres::wire;
+
+import core::bytes;
 import core::result;
 
 public enum WireError {
@@ -162,7 +164,6 @@ public fn write_startup(
     }
     if (application_length> 0) {
         // application_name\0
-
         u8 key[17] = [97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 95, 110, 97, 109, 101, 0];
 
         i = 0;
@@ -283,25 +284,22 @@ public fn parse_data_row(MessageView& message, usize fields, i64 field_capacity)
         i64 len = read_i32_be(message.payload + c);
 
         c += 4;
+        unsafe {
+            auto f = (fields + n*(size_of<FieldView>()as i64))as FieldView*mut;
 
-        auto f = (fields + n*(size_of<FieldView>()as i64))as FieldView*mut;
-
-        if (len == -1) {
-            unsafe {
+            if (len == -1) {
                 (*f).data = 0;
                 (*f).length = 0;
                 (*f).is_null = true;
-            }
-        } else {
-            if (len<0 || c + len> message.payload_length) {
-                return Result<i64, WireError>::Error(WireError::InvalidMessage);
-            }
-            unsafe {
+            } else {
+                if (len<0 || c + len> message.payload_length) {
+                    return Result<i64, WireError>::Error(WireError::InvalidMessage);
+                }
                 (*f).data = message.payload + c;
                 (*f).length = len;
                 (*f).is_null = false;
+                c += len;
             }
-            c += len;
         }
         n += 1;
     }
@@ -382,9 +380,9 @@ public fn write_bind_text(
     i64 i = 0;
 
     while (i < value_count) {
-        auto value = (values + i * (size_of<BindValue>()as i64))as BindValue*const;
-
         unsafe {
+            auto value = (values + i * (size_of<BindValue>()as i64))as BindValue*const;
+
             needed += 4;
             if (!(*value).is_null) {
                 if ((*value).length < 0 || ((*value).length> 0 && (*value).data == 0)) {
@@ -419,6 +417,7 @@ public fn write_bind_text(
     c += statement_length;
     store(output + c, 0);
     c += 1;
+
     // Zero per-parameter format codes means all parameters use text format.
     write_i16_be(output + c, 0);
     c += 2;
@@ -426,9 +425,9 @@ public fn write_bind_text(
     c += 2;
     i = 0;
     while (i < value_count) {
-        auto value = (values + i * (size_of<BindValue>()as i64))as BindValue*const;
-
         unsafe {
+            auto value = (values + i * (size_of<BindValue>()as i64))as BindValue*const;
+
             if ((*value).is_null) {
                 write_i32_be(output + c, -1);
                 c += 4;
@@ -447,6 +446,7 @@ public fn write_bind_text(
         }
         i += 1;
     }
+
     // Zero result format codes means text results for every column.
     write_i16_be(output + c, 0);
     c += 2;
@@ -563,10 +563,9 @@ public fn parse_row_description(
         if (fixed + 18> message.payload_length) {
             return Result<i64, WireError>::Error(WireError::InvalidMessage);
         }
-
-        auto column = (columns + n * (size_of<ColumnView>()as i64))as ColumnView*mut;
-
         unsafe {
+            auto column = (columns + n * (size_of<ColumnView>()as i64))as ColumnView*mut;
+
             (*column).name = message.payload + c;
             (*column).name_length = name_length;
             (*column).table_oid = read_i32_be(message.payload + fixed);

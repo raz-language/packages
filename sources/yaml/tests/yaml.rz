@@ -1,0 +1,80 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import yaml::error;
+import yaml::reader;
+import yaml::value;
+import yaml::writer;
+
+fn main() -> i64 {
+    u8 output[128];
+    u8 name_key[4] = [110, 97, 109, 101];
+    u8 name_value[3] = [114, 97, 122];
+    u8 ports_key[5] = [112, 111, 114, 116, 115];
+    u8 port[4] = [56, 48, 56, 48];
+    YamlWriter writer = yaml::writer::create(&mut output[0]as usize, 128);
+
+    if (yaml::writer::document_start(&mut writer) != YamlError::None) {
+        return 1;
+    }
+    if (
+        yaml::writer::mapping_string(
+            &mut writer,
+            0,
+            &name_key[0]as usize,
+            4,
+            &name_value[0]as usize,
+            3
+        ) != YamlError::None
+    ) {
+        return 2;
+    }
+    if (
+        yaml::writer::mapping_plain(
+            &mut writer,
+            0,
+            &ports_key[0]as usize,
+            5,
+            &port[0]as usize,
+            4
+        ) != YamlError::None
+    ) {
+        return 3;
+    }
+    if (yaml::writer::written(&writer) != 28) {
+        return 4;
+    }
+
+    YamlReader reader = yaml::reader::create(&output[0]as usize, yaml::writer::written(&writer), 32);
+    YamlLine line;
+
+    if (
+        yaml::reader::next(&mut reader, &mut line) != YamlError::None ||
+        line.kind != YamlLineKind::DocumentStart
+    ) {
+        return 5;
+    }
+    if (
+        yaml::reader::next(&mut reader, &mut line) != YamlError::None ||
+        line.kind != YamlLineKind::Mapping ||
+        line.scalar_kind != YamlScalarKind::String
+    ) {
+        return 6;
+    }
+    if (
+        yaml::reader::next(&mut reader, &mut line) != YamlError::None ||
+        line.scalar_kind != YamlScalarKind::Integer
+    ) {
+        return 7;
+    }
+
+    i64 integer = 0;
+
+    if (yaml::reader::integer(line.value, &mut integer) != YamlError::None || integer != 8080) {
+        return 8;
+    }
+    if (yaml::reader::next(&mut reader, &mut line) != YamlError::End) {
+        return 9;
+    }
+    return 0;
+}

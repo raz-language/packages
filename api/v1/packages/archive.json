@@ -1,0 +1,22 @@
+{
+  "name": "archive",
+  "owners": [
+    "raz-language"
+  ],
+  "versions": [
+    {
+      "archive": "packages/archive/0.1.0.dpk",
+      "checksum": "2aa222d13a3a6616",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/archive/0.1.0.dpk",
+      "metadata": {
+        "description": "Safe, allocation-free archive format primitives for Raz."
+      },
+      "name": "archive",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.1.0",
+      "yanked": false
+    }
+  ]
+}

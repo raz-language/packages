@@ -1,0 +1,113 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace encoding::hex;
+
+public enum HexError {
+    None,
+    InvalidLength,
+    InvalidDigit,
+    OutputFull,
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn store(usize address, i64 value) {
+    unsafe {
+        *((address)as u8*mut) = value as u8;
+    }
+}
+
+fn value(i64 byte) -> i64 {
+    if (byte >= 48 && byte <= 57) {
+        return byte - 48;
+    }
+
+    i64 folded = byte | 32;
+
+    if (folded >= 97 && folded <= 102) {
+        return folded - 87;
+    }
+    return -1;
+}
+
+fn digit(i64 nibble, bool uppercase) -> i64 {
+    if (nibble < 10) {
+        return 48 + nibble;
+    }
+    if (uppercase) {
+        return 55 + nibble;
+    }
+    return 87 + nibble;
+}
+
+public fn encoded_length(i64 length) -> i64 {
+    if (length < 0 || length > 4611686018427387903) {
+        return -1;
+    }
+    return length * 2;
+}
+
+public fn encode(
+    usize input,
+    i64 length,
+    usize output,
+    i64 capacity,
+    bool uppercase,
+    i64&mut written,
+) -> HexError {
+    *written = 0;
+
+    i64 required = encoded_length(length);
+
+    if (required < 0 || (length > 0 && input == 0)) {
+        return HexError::InvalidLength;
+    }
+    if (capacity < required || (required > 0 && output == 0)) {
+        return HexError::OutputFull;
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        i64 byte = load(input + i);
+
+        store(output + i * 2, digit((byte >> 4) & 15, uppercase));
+        store(output + i * 2 + 1, digit(byte & 15, uppercase));
+        i += 1;
+    }
+    *written = required;
+    return HexError::None;
+}
+
+public fn decode(usize input, i64 length, usize output, i64 capacity, i64&mut written, ) -> HexError {
+    *written = 0;
+    if (length < 0 || (length & 1) != 0 || (length > 0 && input == 0)) {
+        return HexError::InvalidLength;
+    }
+
+    i64 required = length / 2;
+
+    if (capacity < required || (required > 0 && output == 0)) {
+        return HexError::OutputFull;
+    }
+
+    i64 i = 0;
+
+    while (i < required) {
+        i64 high = value(load(input + i * 2));
+        i64 low = value(load(input + i * 2 + 1));
+
+        if (high < 0 || low < 0) {
+            return HexError::InvalidDigit;
+        }
+        store(output + i, (high << 4) | low);
+        i += 1;
+    }
+    *written = required;
+    return HexError::None;
+}

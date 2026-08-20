@@ -1,0 +1,17 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace msgpack::error;
+
+public enum MsgpackError {
+    None,
+    End,
+    InvalidInput,
+    UnexpectedEnd,
+    UnsupportedType,
+    LengthOverflow,
+    IntegerOverflow,
+    DepthExceeded,
+    TypeMismatch,
+    OutputFull,
+}

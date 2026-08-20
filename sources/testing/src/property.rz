@@ -1,0 +1,81 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace testing::property;
+
+import testing::random;
+
+public struct PropertyRunner {
+    TestRng rng;
+    u64 seed;
+    i64 iterations;
+    i64 cursor;
+    i64 failed_case;
+    bool failed;
+}
+
+public fn create(u64 seed, i64 iterations) -> PropertyRunner {
+    if (iterations < 1) {
+        iterations = 1;
+    }
+    return PropertyRunner {
+        rng: testing::random::create(seed),
+        seed: seed,
+        iterations: iterations,
+        cursor: 0,
+        failed_case: -1,
+        failed: false,
+    };
+}
+
+public fn next(PropertyRunner&mut runner) -> bool {
+    if (runner.failed || runner.cursor >= runner.iterations) {
+        return false;
+    }
+    runner.cursor += 1;
+    return true;
+}
+
+public fn case_index(PropertyRunner& runner) -> i64 {
+    return runner.cursor - 1;
+}
+
+public fn next_u64(PropertyRunner&mut runner) -> u64 {
+    return testing::random::next_u64(&mut runner.rng);
+}
+
+public fn range_i64(PropertyRunner&mut runner, i64 minimum, i64 maximum, i64&mut output) -> bool {
+    return testing::random::range_i64(&mut runner.rng, minimum, maximum, output);
+}
+
+public fn reject(PropertyRunner&mut runner) {
+    if (!runner.failed) {
+        runner.failed_case = runner.cursor - 1;
+        runner.failed = true;
+    }
+}
+
+public fn passed(PropertyRunner& runner) -> bool {
+    return !runner.failed && runner.cursor >= runner.iterations;
+}
+
+/// Deterministic scalar shrink sequence: value/2, value/4, ... then zero.
+public fn shrink_i64(i64 value, i64 step, i64&mut output) -> bool {
+    if (step < 0 || step > 63) {
+        return false;
+    }
+    if (step == 63) {
+        *output = 0;
+        return true;
+    }
+    *output = value / ((1 as i64) << (step + 1));
+    return true;
+}
+
+public fn shrink_length(i64 length, i64 step, i64&mut output) -> bool {
+    if (length < 0 || step < 0 || step > 63) {
+        return false;
+    }
+    *output = length >> (step + 1);
+    return true;
+}

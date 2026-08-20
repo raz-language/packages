@@ -1,0 +1,338 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace jwt::jws;
+
+import alloc::string;
+import core::bytes;
+import crypto::mac::hmac;
+import crypto::secure;
+import encoding::base64url;
+import jwt::error;
+import std::encoding::json;
+import std::encoding::json::document;
+
+public struct AlgorithmPolicy {
+    bool allow_hs256;
+    i64 minimum_key_bytes;
+    i64 maximum_token_bytes;
+    i64 clock_leeway_seconds;
+}
+
+public fn strict_policy() -> AlgorithmPolicy {
+    return AlgorithmPolicy {
+        allow_hs256: true,
+        minimum_key_bytes: 32,
+        maximum_token_bytes: 1048576,
+        clock_leeway_seconds: 0,
+    };
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn bytes_equal(usize left, usize right, i64 length) -> bool {
+    i64 i = 0;
+
+    while (i < length) {
+        if (load(left + i) != load(right + i)) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn hs256_header(usize data, i64 length) -> bool {
+    JsonDocument document = std::encoding::json::document::empty();
+
+    if (std::encoding::json::document::parse_borrowed(data, length, 16, &mut document) != JsonError::None) {
+        return false;
+    }
+
+    i64 root = std::encoding::json::document::root_index(&document);
+    JsonValueKind kind;
+
+    if (
+        !std::encoding::json::document::kind_at(&document, root, &mut kind) ||
+        kind != JsonValueKind::Object
+    ) {
+        return false;
+    }
+
+    u8 alg_key[3] = [97, 108, 103];
+    u8 crit_key[4] = [99, 114, 105, 116];
+    u8 hs256[5] = [72, 83, 50, 53, 54];
+    String scratch = alloc::string::with_capacity(32);
+
+    i64 algorithm = std::encoding::json::document::object_get(
+        &document,
+        root,
+        (&alg_key[0])as usize,
+        3,
+        &mut scratch
+    );
+    if (
+        algorithm < 0 ||
+        std::encoding::json::document::object_get(
+            &document,
+            root,
+            (&crit_key[0])as usize,
+            4,
+            &mut scratch
+        ) >= 0
+    ) {
+        return false;
+    }
+    if (
+        !std::encoding::json::document::kind_at(&document, algorithm, &mut kind) ||
+        kind != JsonValueKind::String
+    ) {
+        return false;
+    }
+
+    BytesView value = std::encoding::json::document::value_view(&document, algorithm);
+
+    return value.length == 5 && bytes_equal(value.data, (&hs256[0])as usize, 5);
+}
+
+fn split(usize token, i64 length, i64&mut first, i64&mut second) -> bool {
+    *first = -1;
+    *second = -1;
+
+    i64 i = 0;
+
+    while (i < length) {
+        if (load(token + i) == 46) {
+            if (*first < 0) {
+                *first = i;
+            } else if (*second < 0) {
+                *second = i;
+            } else {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    return *first > 0 && *second > *first + 1 && *second + 1 < length;
+}
+
+public fn sign_hs256(
+    usize header_json,
+    i64 header_length,
+    usize payload_json,
+    i64 payload_length,
+    usize key,
+    i64 key_length,
+    usize output,
+    i64 capacity,
+    i64&mut written,
+) -> JwtError {
+    *written = 0;
+    if (
+        header_length <= 0 ||
+        payload_length <= 0 ||
+        key_length <= 0 ||
+        header_json == 0 ||
+        payload_json == 0 ||
+        key == 0
+    ) {
+        return JwtError::InvalidInput;
+    }
+    if (!hs256_header(header_json, header_length)) {
+        return JwtError::UnsupportedAlgorithm;
+    }
+    if (std::encoding::json::validate(payload_json, payload_length, 64) != JsonError::None) {
+        return JwtError::InvalidPayload;
+    }
+
+    i64 header_encoded = encoding::base64url::encoded_length(header_length);
+    i64 payload_encoded = encoding::base64url::encoded_length(payload_length);
+    i64 signature_encoded = encoding::base64url::encoded_length(32);
+
+    if (header_encoded < 0 || payload_encoded < 0) {
+        return JwtError::InvalidInput;
+    }
+    if (header_encoded > 9223372036854775807 - payload_encoded - signature_encoded - 2) {
+        return JwtError::InvalidInput;
+    }
+
+    i64 required = header_encoded + 1 + payload_encoded + 1 + signature_encoded;
+
+    if (capacity < required || output == 0) {
+        return JwtError::OutputFull;
+    }
+
+    i64 count = 0;
+
+    if (
+        encoding::base64url::encode(
+            header_json,
+            header_length,
+            output,
+            capacity,
+            &mut count
+        ) != Base64UrlError::None ||
+        count != header_encoded
+    ) {
+        return JwtError::OutputFull;
+    }
+    unsafe {
+        *((output + count)as u8*mut) = 46;
+    }
+
+    i64 payload_encoded_written = 0;
+
+    if (
+        encoding::base64url::encode(
+            payload_json,
+            payload_length,
+            output + count + 1,
+            capacity - count - 1,
+            &mut payload_encoded_written
+        ) != Base64UrlError::None ||
+        payload_encoded_written != payload_encoded
+    ) {
+        return JwtError::OutputFull;
+    }
+
+    i64 signing_length = count + 1 + payload_encoded_written;
+
+    unsafe {
+        *((output + signing_length)as u8*mut) = 46;
+    }
+
+    u8 digest[32];
+
+    if (!crypto::mac::hmac::sha256(key, key_length, output, signing_length, (&mut digest[0])as usize)) {
+        return JwtError::CryptoFailure;
+    }
+
+    i64 signature_written = 0;
+
+    if (
+        encoding::base64url::encode(
+            (&digest[0])as usize,
+            32,
+            output + signing_length + 1,
+            capacity - signing_length - 1,
+            &mut signature_written
+        ) != Base64UrlError::None
+    ) {
+        return JwtError::OutputFull;
+    }
+    crypto::secure::zeroize((&mut digest[0])as usize, 32);
+    *written = signing_length + 1 + signature_written;
+    return JwtError::None;
+}
+
+/// Verifies HS256 and decodes the JSON payload into caller-owned storage.
+public fn verify_hs256(
+    usize token,
+    i64 token_length,
+    usize key,
+    i64 key_length,
+    AlgorithmPolicy& policy,
+    usize scratch,
+    i64 scratch_capacity,
+    usize payload,
+    i64 payload_capacity,
+    i64&mut payload_written,
+) -> JwtError {
+    *payload_written = 0;
+    if (
+        token == 0 ||
+        token_length <= 0 ||
+        key == 0 ||
+        key_length <= 0 ||
+        scratch == 0 ||
+        scratch_capacity <= 0
+    ) {
+        return JwtError::InvalidInput;
+    }
+    if (policy.maximum_token_bytes <= 0 || token_length > policy.maximum_token_bytes) {
+        return JwtError::TokenTooLarge;
+    }
+    if (!policy.allow_hs256) {
+        return JwtError::DisallowedAlgorithm;
+    }
+    if (key_length < policy.minimum_key_bytes) {
+        return JwtError::WeakKey;
+    }
+
+    i64 first = -1;
+    i64 second = -1;
+
+    if (!split(token, token_length, &mut first, &mut second)) {
+        return JwtError::InvalidFormat;
+    }
+
+    i64 header_written = 0;
+
+    if (
+        encoding::base64url::decode(
+            token,
+            first,
+            scratch,
+            scratch_capacity,
+            &mut header_written
+        ) != Base64UrlError::None
+    ) {
+        return JwtError::InvalidHeader;
+    }
+    if (!hs256_header(scratch, header_written)) {
+        return JwtError::UnsupportedAlgorithm;
+    }
+
+    u8 supplied[32];
+    i64 supplied_length = 0;
+
+    if (
+        encoding::base64url::decode(
+            token + second + 1,
+            token_length - second - 1,
+            (&mut supplied[0])as usize,
+            32,
+            &mut supplied_length
+        ) != Base64UrlError::None ||
+        supplied_length != 32
+    ) {
+        return JwtError::InvalidFormat;
+    }
+
+    u8 expected[32];
+
+    if (!crypto::mac::hmac::sha256(key, key_length, token, second, (&mut expected[0])as usize)) {
+        return JwtError::CryptoFailure;
+    }
+
+    bool matches = crypto::secure::equal((&supplied[0])as usize, (&expected[0])as usize, 32);
+
+    crypto::secure::zeroize((&mut supplied[0])as usize, 32);
+    crypto::secure::zeroize((&mut expected[0])as usize, 32);
+    if (!matches) {
+        return JwtError::SignatureMismatch;
+    }
+    if (payload == 0 || payload_capacity <= 0) {
+        return JwtError::OutputFull;
+    }
+    if (
+        encoding::base64url::decode(
+            token + first + 1,
+            second - first - 1,
+            payload,
+            payload_capacity,
+            payload_written
+        ) != Base64UrlError::None
+    ) {
+        return JwtError::OutputFull;
+    }
+    if (std::encoding::json::validate(payload, *payload_written, 64) != JsonError::None) {
+        *payload_written = 0;
+        return JwtError::InvalidPayload;
+    }
+    return JwtError::None;
+}

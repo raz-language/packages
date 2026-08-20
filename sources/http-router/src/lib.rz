@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace http_router;
+
 public import http_router::router;
 public import http_router::middleware;
 public import http_router::http;

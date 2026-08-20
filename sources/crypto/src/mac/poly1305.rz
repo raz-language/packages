@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace crypto::mac::poly1305;
+
 public const i64 KEY_SIZE = 32;
 public const i64 TAG_SIZE = 16;
 

@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace http_router::http;
+
 import core::result;
 import std::net::http;
 import http_router::router;
+
 /// Matches directly from Raz stdlib's borrowed HttpRequestView.
 public fn match_request(
     Router& router,

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace crypto::hash::sha3;
+
 public const i64 SHA3_256_SIZE = 32;
 public const i64 SHA3_512_SIZE = 64;
 

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace sqlite::statement;
+
+import core::bytes;
 import core::result;
-import sqlite::abi;
+import sqlite::abi as abi;
 
 public enum Step {
     Row,
@@ -29,99 +31,194 @@ public struct Statement {
 }
 
 public fn from_raw(usize handle, usize database) -> Statement {
-    return Statement { handle: handle, database: database };
+    return Statement {
+        handle: handle,
+        database: database
+    };
 }
 
-public fn is_valid(Statement& statement) -> bool { return statement.handle != 0; }
+public fn is_valid(Statement& statement) -> bool {
+    return statement.handle != 0;
+}
 
 fn error(Statement& statement, i64 code) -> StatementError {
     i64 extended = code;
-    if (statement.database != 0) { extended = abi::sqlite3_extended_errcode(statement.database); }
-    return StatementError { code: code, extended_code: extended };
+
+    if (statement.database != 0) {
+        extended = abi::sqlite3_extended_errcode(statement.database);
+    }
+    return StatementError {
+        code: code,
+        extended_code: extended
+    };
 }
 
 public fn finalize(Statement&mut statement) -> Result<bool, StatementError> {
-    if (statement.handle == 0) { return Result<bool, StatementError>::Ok(false); }
-    usize raw = statement.handle;
+    if (statement.handle == 0) {
+        return Result<bool, StatementError>::Ok(false);
+    }
+
+    i64 rc = sqlite::abi::sqlite3_finalize(statement.handle);
+
     statement.handle = 0;
-    i64 rc = abi::sqlite3_finalize(raw);
-    if (rc != abi::ok()) { return Result<bool, StatementError>::Error(error(statement, rc)); }
+    if (rc != sqlite::abi::ok()) {
+        return Result<bool, StatementError>::Error(error(statement, rc));
+    }
     return Result<bool, StatementError>::Ok(true);
 }
 
 public fn reset(Statement& statement) -> Result<bool, StatementError> {
     i64 rc = abi::sqlite3_reset(statement.handle);
-    if (rc != abi::ok()) { return Result<bool, StatementError>::Error(error(statement, rc)); }
+
+    if (rc != abi::ok()) {
+        return Result<bool, StatementError>::Error(error(statement, rc));
+    }
     return Result<bool, StatementError>::Ok(true);
 }
 
 public fn clear_bindings(Statement& statement) -> Result<bool, StatementError> {
     i64 rc = abi::sqlite3_clear_bindings(statement.handle);
-    if (rc != abi::ok()) { return Result<bool, StatementError>::Error(error(statement, rc)); }
+
+    if (rc != abi::ok()) {
+        return Result<bool, StatementError>::Error(error(statement, rc));
+    }
     return Result<bool, StatementError>::Ok(true);
 }
 
-public fn parameter_count(Statement& statement) -> i64 { return abi::sqlite3_bind_parameter_count(statement.handle); }
+public fn parameter_count(Statement& statement) -> i64 {
+    return abi::sqlite3_bind_parameter_count(statement.handle);
+}
 
 public fn bind_null(Statement& statement, i64 index) -> Result<bool, StatementError> {
     i64 rc = abi::sqlite3_bind_null(statement.handle, index);
-    if (rc != abi::ok()) { return Result<bool, StatementError>::Error(error(statement, rc)); }
+
+    if (rc != abi::ok()) {
+        return Result<bool, StatementError>::Error(error(statement, rc));
+    }
     return Result<bool, StatementError>::Ok(true);
 }
+
 public fn bind_i64(Statement& statement, i64 index, i64 value) -> Result<bool, StatementError> {
     i64 rc = abi::sqlite3_bind_int64(statement.handle, index, value);
-    if (rc != abi::ok()) { return Result<bool, StatementError>::Error(error(statement, rc)); }
+
+    if (rc != abi::ok()) {
+        return Result<bool, StatementError>::Error(error(statement, rc));
+    }
     return Result<bool, StatementError>::Ok(true);
 }
+
 public fn bind_f64(Statement& statement, i64 index, f64 value) -> Result<bool, StatementError> {
     i64 rc = abi::sqlite3_bind_double(statement.handle, index, value);
-    if (rc != abi::ok()) { return Result<bool, StatementError>::Error(error(statement, rc)); }
+
+    if (rc != abi::ok()) {
+        return Result<bool, StatementError>::Error(error(statement, rc));
+    }
     return Result<bool, StatementError>::Ok(true);
 }
+
 public fn bind_text(Statement& statement, i64 index, usize data, i64 length) -> Result<bool, StatementError> {
-    if (length < 0) { return Result<bool, StatementError>::Error(StatementError { code: -1, extended_code: -1 }); }
-    i64 rc = abi::sqlite3_bind_text64(statement.handle, index, data, length as u64, abi::transient_destructor(), abi::utf8());
-    if (rc != abi::ok()) { return Result<bool, StatementError>::Error(error(statement, rc)); }
+    if (length < 0) {
+        return Result<bool, StatementError>::Error(StatementError {
+            code: -1,
+            extended_code: -1
+        }
+        );
+    }
+    i64 rc = abi::sqlite3_bind_text64(
+        statement.handle,
+        index,
+        data,
+        length as u64,
+        abi::transient_destructor(),
+        abi::utf8()
+    );
+    if (rc != abi::ok()) {
+        return Result<bool, StatementError>::Error(error(statement, rc));
+    }
     return Result<bool, StatementError>::Ok(true);
 }
+
 public fn bind_blob(Statement& statement, i64 index, usize data, i64 length) -> Result<bool, StatementError> {
-    if (length < 0) { return Result<bool, StatementError>::Error(StatementError { code: -1, extended_code: -1 }); }
-    i64 rc = abi::sqlite3_bind_blob64(statement.handle, index, data, length as u64, abi::transient_destructor());
-    if (rc != abi::ok()) { return Result<bool, StatementError>::Error(error(statement, rc)); }
+    if (length < 0) {
+        return Result<bool, StatementError>::Error(StatementError {
+            code: -1,
+            extended_code: -1
+        }
+        );
+    }
+    i64 rc = abi::sqlite3_bind_blob64(
+        statement.handle,
+        index,
+        data,
+        length as u64,
+        abi::transient_destructor()
+    );
+    if (rc != abi::ok()) {
+        return Result<bool, StatementError>::Error(error(statement, rc));
+    }
     return Result<bool, StatementError>::Ok(true);
 }
 
 public fn step(Statement& statement) -> Result<Step, StatementError> {
     i64 rc = abi::sqlite3_step(statement.handle);
-    if (rc == abi::row()) { return Result<Step, StatementError>::Ok(Step::Row); }
-    if (rc == abi::done()) { return Result<Step, StatementError>::Ok(Step::Done); }
+
+    if (rc == abi::row()) {
+        return Result<Step, StatementError>::Ok(Step::Row);
+    }
+    if (rc == abi::done()) {
+        return Result<Step, StatementError>::Ok(Step::Done);
+    }
     return Result<Step, StatementError>::Error(error(statement, rc));
 }
 
-public fn column_count(Statement& statement) -> i64 { return abi::sqlite3_column_count(statement.handle); }
+public fn column_count(Statement& statement) -> i64 {
+    return abi::sqlite3_column_count(statement.handle);
+}
 
 public fn column_kind(Statement& statement, i64 column) -> ValueKind {
     i64 kind = abi::sqlite3_column_type(statement.handle, column);
-    if (kind == 1) { return ValueKind::Integer; }
-    if (kind == 2) { return ValueKind::Float; }
-    if (kind == 3) { return ValueKind::Text; }
-    if (kind == 4) { return ValueKind::Blob; }
+
+    if (kind == 1) {
+        return ValueKind::Integer;
+    }
+    if (kind == 2) {
+        return ValueKind::Float;
+    }
+    if (kind == 3) {
+        return ValueKind::Text;
+    }
+    if (kind == 4) {
+        return ValueKind::Blob;
+    }
     return ValueKind::Null;
 }
 
-public fn column_i64(Statement& statement, i64 column) -> i64 { return abi::sqlite3_column_int64(statement.handle, column); }
-public fn column_f64(Statement& statement, i64 column) -> f64 { return abi::sqlite3_column_double(statement.handle, column); }
+public fn column_i64(Statement& statement, i64 column) -> i64 {
+    return abi::sqlite3_column_int64(statement.handle, column);
+}
+
+public fn column_f64(Statement& statement, i64 column) -> f64 {
+    return abi::sqlite3_column_double(statement.handle, column);
+}
 
 /// Borrowed until the next sqlite3_step/reset/finalize on this statement.
 public fn column_text(Statement& statement, i64 column) -> BytesView {
     usize data = abi::sqlite3_column_text(statement.handle, column);
     i64 length = abi::sqlite3_column_bytes(statement.handle, column);
-    return BytesView { data: data, length: length };
+
+    return BytesView {
+        data: data,
+        length: length
+    };
 }
 
 /// Borrowed until the next sqlite3_step/reset/finalize on this statement.
 public fn column_blob(Statement& statement, i64 column) -> BytesView {
     usize data = abi::sqlite3_column_blob(statement.handle, column);
     i64 length = abi::sqlite3_column_bytes(statement.handle, column);
-    return BytesView { data: data, length: length };
+
+    return BytesView {
+        data: data,
+        length: length
+    };
 }

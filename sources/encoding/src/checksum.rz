@@ -1,0 +1,22 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace encoding::checksum;
+
+import std::encoding::checksum;
+
+public fn crc32_begin() -> u32 {
+    return std::encoding::checksum::crc32_begin();
+}
+
+public fn crc32_update(u32 state, usize data, i64 length) -> u32 {
+    return std::encoding::checksum::crc32_update(state, data, length);
+}
+
+public fn crc32_finish(u32 state) -> u32 {
+    return std::encoding::checksum::crc32_finish(state);
+}
+
+public fn crc32(usize data, i64 length) -> u32 {
+    return std::encoding::checksum::crc32(data, length);
+}

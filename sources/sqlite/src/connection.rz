@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace sqlite::connection;
+
 import core::result;
-import sqlite::abi;
+import sqlite::abi as abi;
 import sqlite::statement;
 
 public enum ErrorKind {
@@ -30,42 +31,94 @@ public struct Connection {
     usize handle;
 }
 
+fn load_usize(usize address) -> usize {
+    unsafe {
+        return *(address as usize*const);
+    }
+}
+
 fn classify(i64 code) -> ErrorKind {
     i64 primary = code & 255;
-    if (primary == 5) { return ErrorKind::Busy; }
-    if (primary == 6) { return ErrorKind::Locked; }
-    if (primary == 8) { return ErrorKind::ReadOnly; }
-    if (primary == 10) { return ErrorKind::Io; }
-    if (primary == 11) { return ErrorKind::Corrupt; }
-    if (primary == 12) { return ErrorKind::NotFound; }
-    if (primary == 19) { return ErrorKind::Constraint; }
-    if (primary == 21) { return ErrorKind::Misuse; }
+
+    if (primary == 5) {
+        return ErrorKind::Busy;
+    }
+    if (primary == 6) {
+        return ErrorKind::Locked;
+    }
+    if (primary == 8) {
+        return ErrorKind::ReadOnly;
+    }
+    if (primary == 10) {
+        return ErrorKind::Io;
+    }
+    if (primary == 11) {
+        return ErrorKind::Corrupt;
+    }
+    if (primary == 12) {
+        return ErrorKind::NotFound;
+    }
+    if (primary == 19) {
+        return ErrorKind::Constraint;
+    }
+    if (primary == 21) {
+        return ErrorKind::Misuse;
+    }
     return ErrorKind::Other;
 }
 
 public fn error_from_handle(usize db, i64 code) -> DbError {
     i64 extended = code;
-    if (db != 0) { extended = abi::sqlite3_extended_errcode(db); }
-    return DbError { kind: classify(code), code: code, extended_code: extended };
+
+    if (db != 0) {
+        extended = abi::sqlite3_extended_errcode(db);
+    }
+    return DbError {
+        kind: classify(code),
+        code: code,
+        extended_code: extended
+    };
 }
 
-public fn empty() -> Connection { return Connection { handle: 0 }; }
-public fn is_open(Connection& db) -> bool { return db.handle != 0; }
+public fn empty() -> Connection {
+    return Connection {
+        handle: 0
+    };
+}
+
+public fn is_open(Connection& db) -> bool {
+    return db.handle != 0;
+}
 
 /// Opens a NUL-terminated UTF-8 filename. `filename_cstr` must remain valid only
 /// for this call; SQLite copies what it needs during sqlite3_open_v2.
 public fn open_cstr(usize filename_cstr, i64 flags) -> Result<Connection, DbError> {
     if (filename_cstr == 0) {
-        return Result<Connection, DbError>::Error(DbError { kind: ErrorKind::InvalidArgument, code: -1, extended_code: -1 });
+        return Result<Connection, DbError>::Error(DbError {
+            kind: ErrorKind::InvalidArgument,
+            code: -1,
+            extended_code: -1
+        }
+        );
     }
+
     usize raw = 0;
-    i64 rc = abi::sqlite3_open_v2(filename_cstr, &mut raw, flags, 0);
+    usize raw_address = &mut raw as usize;
+    i64 rc = abi::sqlite3_open_v2(filename_cstr, raw_address, flags, 0);
+    usize handle = load_usize(raw_address);
+
     if (rc != abi::ok()) {
-        DbError error = error_from_handle(raw, rc);
-        if (raw != 0) { abi::sqlite3_close_v2(raw); }
+        DbError error = error_from_handle(handle, rc);
+
+        if (handle != 0) {
+            abi::sqlite3_close_v2(handle);
+        }
         return Result<Connection, DbError>::Error(error);
     }
-    return Result<Connection, DbError>::Ok(Connection { handle: raw });
+    return Result<Connection, DbError>::Ok(Connection {
+        handle: handle
+    }
+    );
 }
 
 public fn open_readwrite_cstr(usize filename_cstr) -> Result<Connection, DbError> {
@@ -78,52 +131,98 @@ public fn open_readonly_cstr(usize filename_cstr) -> Result<Connection, DbError>
 
 public fn open_memory() -> Result<Connection, DbError> {
     u8 name[9] = [58, 109, 101, 109, 111, 114, 121, 58, 0];
+
     return open_cstr(&name[0]as usize, abi::open_readwrite() | abi::open_create() | abi::open_memory());
 }
 
 public fn close(Connection&mut db) -> Result<bool, DbError> {
-    if (db.handle == 0) { return Result<bool, DbError>::Ok(false); }
+    if (db.handle == 0) {
+        return Result<bool, DbError>::Ok(false);
+    }
+
     i64 rc = abi::sqlite3_close_v2(db.handle);
-    if (rc != abi::ok()) { return Result<bool, DbError>::Error(error_from_handle(db.handle, rc)); }
+
+    if (rc != abi::ok()) {
+        return Result<bool, DbError>::Error(error_from_handle(db.handle, rc));
+    }
     db.handle = 0;
     return Result<bool, DbError>::Ok(true);
 }
 
 public fn set_busy_timeout(Connection& db, i64 milliseconds) -> Result<bool, DbError> {
     if (db.handle == 0 || milliseconds < 0) {
-        return Result<bool, DbError>::Error(DbError { kind: ErrorKind::InvalidArgument, code: -1, extended_code: -1 });
+        return Result<bool, DbError>::Error(DbError {
+            kind: ErrorKind::InvalidArgument,
+            code: -1,
+            extended_code: -1
+        }
+        );
     }
+
     i64 rc = abi::sqlite3_busy_timeout(db.handle, milliseconds);
-    if (rc != abi::ok()) { return Result<bool, DbError>::Error(error_from_handle(db.handle, rc)); }
+
+    if (rc != abi::ok()) {
+        return Result<bool, DbError>::Error(error_from_handle(db.handle, rc));
+    }
     return Result<bool, DbError>::Ok(true);
 }
 
 public fn changes(Connection& db) -> i64 {
-    if (db.handle == 0) { return 0; }
+    if (db.handle == 0) {
+        return 0;
+    }
     return abi::sqlite3_changes64(db.handle);
 }
 
 public fn last_insert_rowid(Connection& db) -> i64 {
-    if (db.handle == 0) { return 0; }
+    if (db.handle == 0) {
+        return 0;
+    }
     return abi::sqlite3_last_insert_rowid(db.handle);
 }
 
-public fn prepare(Connection& db, usize sql, i64 sql_length) -> Result<statement::Statement, DbError> {
+public fn prepare(Connection& db, usize sql, i64 sql_length) -> Result<Statement, DbError> {
     if (db.handle == 0 || sql == 0 || sql_length < 0) {
-        return Result<statement::Statement, DbError>::Error(DbError { kind: ErrorKind::InvalidArgument, code: -1, extended_code: -1 });
+        return Result<Statement, DbError>::Error(DbError {
+            kind: ErrorKind::InvalidArgument,
+            code: -1,
+            extended_code: -1
+        }
+        );
     }
+
     usize raw = 0;
-    i64 rc = abi::sqlite3_prepare_v3(db.handle, sql, sql_length, 0 as u32, &mut raw, 0);
-    if (rc != abi::ok()) { return Result<statement::Statement, DbError>::Error(error_from_handle(db.handle, rc)); }
-    return Result<statement::Statement, DbError>::Ok(statement::from_raw(raw, db.handle));
+    usize raw_address = &mut raw as usize;
+    i64 rc = abi::sqlite3_prepare_v3(db.handle, sql, sql_length, 0 as u32, raw_address, 0);
+
+    if (rc != abi::ok()) {
+        return Result<Statement, DbError>::Error(error_from_handle(db.handle, rc));
+    }
+
+    usize handle = load_usize(raw_address);
+
+    return Result<Statement, DbError>::Ok(from_raw(handle, db.handle));
 }
 
-public fn prepare_persistent(Connection& db, usize sql, i64 sql_length) -> Result<statement::Statement, DbError> {
+public fn prepare_persistent(Connection& db, usize sql, i64 sql_length) -> Result<Statement, DbError> {
     if (db.handle == 0 || sql == 0 || sql_length < 0) {
-        return Result<statement::Statement, DbError>::Error(DbError { kind: ErrorKind::InvalidArgument, code: -1, extended_code: -1 });
+        return Result<Statement, DbError>::Error(DbError {
+            kind: ErrorKind::InvalidArgument,
+            code: -1,
+            extended_code: -1
+        }
+        );
     }
+
     usize raw = 0;
-    i64 rc = abi::sqlite3_prepare_v3(db.handle, sql, sql_length, abi::prepare_persistent(), &mut raw, 0);
-    if (rc != abi::ok()) { return Result<statement::Statement, DbError>::Error(error_from_handle(db.handle, rc)); }
-    return Result<statement::Statement, DbError>::Ok(statement::from_raw(raw, db.handle));
+    usize raw_address = &mut raw as usize;
+    i64 rc = abi::sqlite3_prepare_v3(db.handle, sql, sql_length, abi::prepare_persistent(), raw_address, 0, );
+
+    if (rc != abi::ok()) {
+        return Result<Statement, DbError>::Error(error_from_handle(db.handle, rc));
+    }
+
+    usize handle = load_usize(raw_address);
+
+    return Result<Statement, DbError>::Ok(from_raw(handle, db.handle));
 }

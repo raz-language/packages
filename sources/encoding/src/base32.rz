@@ -1,0 +1,148 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace encoding::base32;
+
+public enum Base32Error {
+    None,
+    InvalidLength,
+    InvalidByte,
+    InvalidPadding,
+    OutputFull,
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn store(usize address, i64 value) {
+    unsafe {
+        *((address)as u8*mut) = value as u8;
+    }
+}
+
+fn alphabet(i64 value, bool lowercase) -> i64 {
+    if (value < 26) {
+        if (lowercase) {
+            return 97 + value;
+        }
+        return 65 + value;
+    }
+    return 50 + value - 26;
+}
+
+fn value(i64 byte) -> i64 {
+    i64 folded = byte | 32;
+
+    if (folded >= 97 && folded <= 122) {
+        return folded - 97;
+    }
+    if (byte >= 50 && byte <= 55) {
+        return byte - 50 + 26;
+    }
+    return -1;
+}
+
+public fn encoded_length(i64 length) -> i64 {
+    if (length < 0 || length > 5764607523034234879) {
+        return -1;
+    }
+    return (length * 8 + 4) / 5;
+}
+
+public fn decoded_length(i64 length) -> i64 {
+    if (length < 0) {
+        return -1;
+    }
+
+    i64 remainder = length & 7;
+
+    if (remainder == 1 || remainder == 3 || remainder == 6) {
+        return -1;
+    }
+    return (length * 5) / 8;
+}
+
+/// Encodes canonical unpadded RFC 4648 base32.
+public fn encode(
+    usize input,
+    i64 length,
+    usize output,
+    i64 capacity,
+    bool lowercase,
+    i64&mut written,
+) -> Base32Error {
+    *written = 0;
+
+    i64 required = encoded_length(length);
+
+    if (required < 0 || (length > 0 && input == 0)) {
+        return Base32Error::InvalidLength;
+    }
+    if (capacity < required || (required > 0 && output == 0)) {
+        return Base32Error::OutputFull;
+    }
+
+    u64 accumulator = 0;
+    i64 bits = 0;
+    i64 source = 0;
+    i64 destination = 0;
+
+    while (source < length) {
+        accumulator = (accumulator << 8) | (load(input + source)as u64);
+        bits += 8;
+        source += 1;
+        while (bits >= 5) {
+            bits -= 5;
+            store(output + destination, alphabet(((accumulator >> bits) & 31)as i64, lowercase));
+            destination += 1;
+        }
+    }
+    if (bits > 0) {
+        store(output + destination, alphabet(((accumulator << (5 - bits)) & 31)as i64, lowercase));
+        destination += 1;
+    }
+    *written = destination;
+    return Base32Error::None;
+}
+
+public fn decode(usize input, i64 length, usize output, i64 capacity, i64&mut written, ) -> Base32Error {
+    *written = 0;
+
+    i64 required = decoded_length(length);
+
+    if (required < 0 || (length > 0 && input == 0)) {
+        return Base32Error::InvalidLength;
+    }
+    if (capacity < required || (required > 0 && output == 0)) {
+        return Base32Error::OutputFull;
+    }
+
+    u64 accumulator = 0;
+    i64 bits = 0;
+    i64 source = 0;
+    i64 destination = 0;
+
+    while (source < length) {
+        i64 digit = value(load(input + source));
+
+        if (digit < 0) {
+            return Base32Error::InvalidByte;
+        }
+        accumulator = (accumulator << 5) | (digit as u64);
+        bits += 5;
+        source += 1;
+        if (bits >= 8) {
+            bits -= 8;
+            store(output + destination, ((accumulator >> bits) & 255)as i64);
+            destination += 1;
+        }
+    }
+    if (bits > 0 && (accumulator & (((1 as u64) << bits) - 1)) != 0) {
+        return Base32Error::InvalidPadding;
+    }
+    *written = destination;
+    return Base32Error::None;
+}

@@ -1,0 +1,266 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace csv::reader;
+
+import core::bytes;
+
+public enum CsvError {
+    None,
+    End,
+    InvalidInput,
+    InvalidDelimiter,
+    UnterminatedQuote,
+    UnexpectedQuote,
+    TrailingData,
+    OutputFull,
+}
+
+public struct CsvField {
+    BytesView raw;
+    i64 row;
+    i64 column;
+    bool quoted;
+    bool end_of_record;
+}
+
+public struct CsvReader {
+    BytesView source;
+    i64 cursor;
+    i64 row;
+    i64 column;
+    i64 delimiter;
+    bool pending_empty;
+    bool done;
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn valid_delimiter(i64 delimiter) -> bool {
+    return delimiter >= 32 && delimiter <= 126 && delimiter != 34;
+}
+
+public fn create(usize data, i64 length, i64 delimiter) -> CsvReader {
+    i64 cursor = 0;
+
+    if (length >= 3 && data != 0 && load(data) == 239 && load(data + 1) == 187 && load(data + 2) == 191) {
+        cursor = 3;
+    }
+    return CsvReader {
+        source: BytesView {
+            data: data,
+            length: length
+        },
+        cursor: cursor,
+        row: 0,
+        column: 0,
+        delimiter: delimiter,
+        pending_empty: false,
+        done: length <= cursor,
+    };
+}
+
+fn finish_field(CsvReader&mut reader, i64 next, bool record_end) {
+    reader.cursor = next;
+    if (record_end) {
+        reader.row += 1;
+        reader.column = 0;
+    } else {
+        reader.column += 1;
+    }
+    if (reader.cursor >= reader.source.length && !reader.pending_empty) {
+        reader.done = true;
+    }
+}
+
+public fn next(CsvReader&mut reader, CsvField&mut output) -> CsvError {
+    if (!valid_delimiter(reader.delimiter)) {
+        return CsvError::InvalidDelimiter;
+    }
+    if (reader.source.length < 0 || (reader.source.length > 0 && reader.source.data == 0)) {
+        return CsvError::InvalidInput;
+    }
+    if (reader.done) {
+        return CsvError::End;
+    }
+    if (reader.pending_empty) {
+        *output = CsvField {
+            raw: BytesView {
+                data: reader.source.data + reader.source.length,
+                length: 0
+            },
+            row: reader.row,
+            column: reader.column,
+            quoted: false,
+            end_of_record: true,
+        };
+        reader.pending_empty = false;
+        reader.done = true;
+        reader.row += 1;
+        reader.column = 0;
+        return CsvError::None;
+    }
+
+    i64 field_row = reader.row;
+    i64 field_column = reader.column;
+    i64 cursor = reader.cursor;
+
+    if (load(reader.source.data + cursor) == 34) {
+        i64 start = cursor + 1;
+
+        cursor = start;
+        while (cursor < reader.source.length) {
+            i64 byte = load(reader.source.data + cursor);
+
+            if (byte != 34) {
+                cursor += 1;
+                continue;
+            }
+            if (cursor + 1 < reader.source.length && load(reader.source.data + cursor + 1) == 34) {
+                cursor += 2;
+                continue;
+            }
+
+            i64 end = cursor;
+
+            cursor += 1;
+
+            bool record_end = false;
+
+            if (cursor == reader.source.length) {
+                record_end = true;
+            } else if (load(reader.source.data + cursor) == reader.delimiter) {
+                cursor += 1;
+                if (cursor == reader.source.length) {
+                    reader.pending_empty = true;
+                }
+            } else if (load(reader.source.data + cursor) == 10) {
+                cursor += 1;
+                record_end = true;
+            } else if (load(reader.source.data + cursor) == 13) {
+                if (cursor + 1 >= reader.source.length || load(reader.source.data + cursor + 1) != 10) {
+                    return CsvError::TrailingData;
+                }
+                cursor += 2;
+                record_end = true;
+            } else {
+                return CsvError::TrailingData;
+            }
+            *output = CsvField {
+                raw: BytesView {
+                    data: reader.source.data + start,
+                    length: end - start
+                },
+                row: field_row,
+                column: field_column,
+                quoted: true,
+                end_of_record: record_end,
+            };
+            finish_field(reader, cursor, record_end);
+            return CsvError::None;
+        }
+        return CsvError::UnterminatedQuote;
+    }
+
+    i64 start = cursor;
+
+    while (cursor < reader.source.length) {
+        i64 byte = load(reader.source.data + cursor);
+
+        if (byte == 34) {
+            return CsvError::UnexpectedQuote;
+        }
+        if (byte == reader.delimiter || byte == 10 || byte == 13) {
+            break;
+        }
+        cursor += 1;
+    }
+
+    i64 end = cursor;
+    bool record_end = false;
+
+    if (cursor == reader.source.length) {
+        record_end = true;
+    } else if (load(reader.source.data + cursor) == reader.delimiter) {
+        cursor += 1;
+        if (cursor == reader.source.length) {
+            reader.pending_empty = true;
+        }
+    } else if (load(reader.source.data + cursor) == 10) {
+        cursor += 1;
+        record_end = true;
+    } else {
+        if (cursor + 1 >= reader.source.length || load(reader.source.data + cursor + 1) != 10) {
+            return CsvError::TrailingData;
+        }
+        cursor += 2;
+        record_end = true;
+    }
+    *output = CsvField {
+        raw: BytesView {
+            data: reader.source.data + start,
+            length: end - start
+        },
+        row: field_row,
+        column: field_column,
+        quoted: false,
+        end_of_record: record_end,
+    };
+    finish_field(reader, cursor, record_end);
+    return CsvError::None;
+}
+
+public fn decoded_length(CsvField& field) -> i64 {
+    if (!field.quoted) {
+        return field.raw.length;
+    }
+
+    i64 length = 0;
+    i64 i = 0;
+
+    while (i < field.raw.length) {
+        if (
+            load(field.raw.data + i) == 34 &&
+            i + 1 < field.raw.length &&
+            load(field.raw.data + i + 1) == 34
+        ) {
+            i += 2;
+        } else {
+            i += 1;
+        }
+        length += 1;
+    }
+    return length;
+}
+
+public fn decode(CsvField& field, usize output, i64 capacity, i64&mut written) -> CsvError {
+    *written = 0;
+
+    i64 required = decoded_length(field);
+
+    if (capacity < required || (required > 0 && output == 0)) {
+        return CsvError::OutputFull;
+    }
+
+    i64 source = 0;
+    i64 destination = 0;
+
+    while (source < field.raw.length) {
+        i64 byte = load(field.raw.data + source);
+
+        unsafe {
+            *((output + destination)as u8*mut) = byte as u8;
+        }
+        source += 1;
+        if (field.quoted && byte == 34 && source < field.raw.length && load(field.raw.data + source) == 34) {
+            source += 1;
+        }
+        destination += 1;
+    }
+    *written = destination;
+    return CsvError::None;
+}

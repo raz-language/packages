@@ -15,4 +15,11 @@ members = [
     "multipart",
     "archive",
     "testing",
+    "encoding",
+    "json",
+    "csv",
+    "yaml",
+    "cbor",
+    "msgpack",
+    "protobuf",
 ]

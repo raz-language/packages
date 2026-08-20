@@ -1,3 +1,3 @@
 # multipart examples
 
-Small executable examples demonstrating stable `multipart` APIs live here.
+- `write_form.rz` writes a bounded single-field form body.

@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace postgres::auth;
+
+import core::bytes;
 import core::result;
-import crypto::hash::sha256;
-import crypto::mac::hmac;
+import crypto::hash::sha256 as sha256;
+import crypto::mac::hmac as hmac;
 import crypto::secure;
 import std::encoding::base64;
-import postgres::wire;
+import postgres::wire as wire;
 
 public enum AuthKind {
     Ok,
@@ -95,7 +97,15 @@ public fn scram_hi(
     u8 u[32];
     u8 acc[32];
 
-    if (!hmac::sha256(password, password_length, &block[0]as usize, salt_length + 4, &mut u[0]as usize)) {
+    if (
+        !crypto::mac::hmac::sha256(
+            password,
+            password_length,
+            &block[0]as usize,
+            salt_length + 4,
+            &mut u[0]as usize
+        )
+    ) {
         return Result<bool, AuthError>::Error(AuthError::CryptoFailure);
     }
     i = 0;
@@ -107,7 +117,7 @@ public fn scram_hi(
     i64 round = 1;
 
     while (round<iterations) {
-        if (!hmac::sha256(password, password_length, &u[0]as usize, 32, &mut u[0]as usize)) {
+        if (!crypto::mac::hmac::sha256(password, password_length, &u[0]as usize, 32, &mut u[0]as usize)) {
             return Result<bool, AuthError>::Error(AuthError::CryptoFailure);
         }
         i = 0;
@@ -130,17 +140,17 @@ public fn scram_hi(
 public fn client_key(usize salted_password, usize output) -> bool {
     u8 k[9] = [67, 108, 105, 101, 110, 116, 32, 75, 101];
 
-    return hmac::sha256(salted_password, 32, &k[0]as usize, 9, output);
+    return crypto::mac::hmac::sha256(salted_password, 32, &k[0]as usize, 9, output);
 }
 
 public fn server_key(usize salted_password, usize output) -> bool {
     u8 k[9] = [83, 101, 114, 118, 101, 114, 32, 75, 101];
 
-    return hmac::sha256(salted_password, 32, &k[0]as usize, 9, output);
+    return crypto::mac::hmac::sha256(salted_password, 32, &k[0]as usize, 9, output);
 }
 
 public fn stored_key(usize client_key_bytes, usize output) -> bool {
-    return sha256::digest(client_key_bytes, 32, output);
+    return crypto::hash::sha256::digest(client_key_bytes, 32, output);
 }
 
 public fn xor32(usize left, usize right, usize output) {
@@ -378,15 +388,10 @@ public fn scram_continue(
     client.server_first_length = copied;
 
     BytesView nonce = attribute(server_first, server_first_length, 114);
-
     // r
-
     BytesView salt64 = attribute(server_first, server_first_length, 115);
-
     // s
-
     BytesView iteration_text = attribute(server_first, server_first_length, 105);
-
     // i
     if (nonce.data == 0 || salt64.data == 0 || iteration_text.data == 0) {
         return Result<i64, ScramError>::Error(ScramError::InvalidServerMessage);
@@ -427,7 +432,6 @@ public fn scram_continue(
 
     i64 c = 0;
     u8 channel[7] = [99, 61, 98, 105, 119, 115, 44];
-
     // c=biws,
     c = append_bytes(&mut client.client_final_without_proof[0]as usize, 768, c, &channel[0]as usize, 7);
     c = put(&mut client.client_final_without_proof[0]as usize, 768, c, 114);
@@ -540,14 +544,12 @@ public fn scram_verify_final(
     }
 
     BytesView error_value = attribute(final_message, final_length, 101);
-
     // e
     if (error_value.data != 0) {
         return Result<bool, ScramError>::Error(ScramError::InvalidServerMessage);
     }
 
     BytesView proof64 = attribute(final_message, final_length, 118);
-
     // v
     if (proof64.data == 0) {
         return Result<bool, ScramError>::Error(ScramError::InvalidServerMessage);

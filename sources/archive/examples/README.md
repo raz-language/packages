@@ -1,3 +1,3 @@
 # archive examples
 
-Small executable examples demonstrating stable `archive` APIs live here.
+- `inspect_path.rz` validates a member name before extraction.

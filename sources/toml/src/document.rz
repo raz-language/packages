@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace toml::document;
+
 import alloc::string;
 import alloc::vec;
 import core::bytes;
+
 /// Classification of a TOML value. String and date/time values remain borrowed
 /// source slices; consumers can decode them only when ownership is required.
 public enum TomlValueKind {
@@ -133,4 +135,10 @@ public fn destroy(TomlDocument&mut document) {
     document.borrowed_source = 0;
     document.borrowed_length = 0;
     document.borrowed = false;
+}
+
+impl Drop for TomlDocument {
+    fn drop(TomlDocument&mut self) {
+        destroy(self);
+    }
 }

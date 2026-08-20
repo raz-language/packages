@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace postgres::tls;
+
 import core::result;
 import std::net;
 import std::net::tls;
-import postgres::wire;
+import postgres::wire as wire;
 
 public enum PgTlsError {
     None,
@@ -30,7 +31,7 @@ public struct PgTls {
     bool ready;
 }
 
-fn flush(PgTls& stream) -> bool {
+fn flush(PgTls&mut stream) -> bool {
     while (std::net::tls::engine_pending_encrypted(&stream.engine) > 0) {
         i64 count = std::net::tls::engine_drain(&mut stream.engine, stream.scratch, stream.scratch_capacity);
 
@@ -47,7 +48,7 @@ fn flush(PgTls& stream) -> bool {
     return true;
 }
 
-fn feed_socket(PgTls& stream) -> i64 {
+fn feed_socket(PgTls&mut stream) -> i64 {
     i64 count = std::net::receive(stream.socket, stream.scratch, stream.scratch_capacity);
 
     if (count <= 0) {
@@ -57,6 +58,27 @@ fn feed_socket(PgTls& stream) -> i64 {
         return -1;
     }
     return count;
+}
+
+fn complete_handshake(PgTls&mut stream) -> PgTlsError {
+    while (!std::net::tls::engine_handshaken(&stream.engine)) {
+        i64 state = std::net::tls::engine_handshake(&mut stream.engine);
+
+        if (!flush(stream)) {
+            return PgTlsError::Io;
+        }
+        if (state < 0) {
+            return PgTlsError::Handshake;
+        }
+        if (std::net::tls::engine_handshaken(&stream.engine)) {
+            break;
+        }
+        if (feed_socket(stream) <= 0) {
+            return PgTlsError::Closed;
+        }
+    }
+    stream.ready = true;
+    return PgTlsError::None;
 }
 
 /// Sends PostgreSQL SSLRequest, verifies `S`, then performs a blocking TLS handshake
@@ -106,27 +128,16 @@ public fn upgrade(
         scratch_capacity: scratch_capacity,
         ready: false
     };
-    while (!std::net::tls::engine_handshaken(&stream.engine)) {
-        i64 state = std::net::tls::engine_handshake(&mut stream.engine);
 
-        if (!flush(&stream)) {
-            return Result<PgTls, PgTlsError>::Error(PgTlsError::Io);
-        }
-        if (state < 0) {
-            return Result<PgTls, PgTlsError>::Error(PgTlsError::Handshake);
-        }
-        if (std::net::tls::engine_handshaken(&stream.engine)) {
-            break;
-        }
-        if (feed_socket(&stream) <= 0) {
-            return Result<PgTls, PgTlsError>::Error(PgTlsError::Closed);
-        }
+    PgTlsError handshake = complete_handshake(&mut stream);
+
+    if (handshake != PgTlsError::None) {
+        return Result<PgTls, PgTlsError>::Error(handshake);
     }
-    stream.ready = true;
     return Result<PgTls, PgTlsError>::Ok(move stream);
 }
 
-public fn write_all(PgTls& stream, usize data, i64 length) -> PgTlsError {
+public fn write_all(PgTls&mut stream, usize data, i64 length) -> PgTlsError {
     if (!stream.ready || length < 0 || (length > 0 && data == 0)) {
         return PgTlsError::InvalidArgument;
     }
@@ -153,7 +164,7 @@ public fn write_all(PgTls& stream, usize data, i64 length) -> PgTlsError {
     return PgTlsError::None;
 }
 
-public fn read(PgTls& stream, usize output, i64 capacity) -> i64 {
+public fn read(PgTls&mut stream, usize output, i64 capacity) -> i64 {
     if (!stream.ready || capacity < 0 || (capacity > 0 && output == 0)) {
         return -1;
     }
@@ -173,7 +184,7 @@ public fn read(PgTls& stream, usize output, i64 capacity) -> i64 {
     }
 }
 
-public fn close(PgTls& stream) {
+public fn close(PgTls&mut stream) {
     if (stream.ready) {
         std::net::tls::engine_shutdown(&mut stream.engine);
         flush(stream);

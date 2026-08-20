@@ -1,0 +1,154 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace csv::writer;
+
+public enum CsvWriteError {
+    None,
+    InvalidInput,
+    InvalidDelimiter,
+    InvalidState,
+    OutputFull,
+}
+
+public struct CsvWriter {
+    usize output;
+    i64 capacity;
+    i64 length;
+    i64 delimiter;
+    i64 fields_in_record;
+    i64 records;
+    CsvWriteError error;
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn valid_delimiter(i64 delimiter) -> bool {
+    return delimiter >= 32 && delimiter <= 126 && delimiter != 34;
+}
+
+public fn create(usize output, i64 capacity, i64 delimiter) -> CsvWriter {
+    return CsvWriter {
+        output: output,
+        capacity: capacity,
+        length: 0,
+        delimiter: delimiter,
+        fields_in_record: 0,
+        records: 0,
+        error: CsvWriteError::None,
+    };
+}
+
+fn append(CsvWriter&mut writer, i64 byte) -> bool {
+    if (writer.length >= writer.capacity || writer.output == 0) {
+        writer.error = CsvWriteError::OutputFull;
+        return false;
+    }
+    unsafe {
+        *((writer.output + writer.length)as u8*mut) = byte as u8;
+    }
+    writer.length += 1;
+    return true;
+}
+
+fn needs_quotes(usize data, i64 length, i64 delimiter) -> bool {
+    i64 i = 0;
+
+    while (i < length) {
+        i64 byte = load(data + i);
+
+        if (byte == delimiter || byte == 34 || byte == 10 || byte == 13) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+public fn field(CsvWriter&mut writer, usize data, i64 length) -> CsvWriteError {
+    if (writer.error != CsvWriteError::None) {
+        return writer.error;
+    }
+    if (!valid_delimiter(writer.delimiter)) {
+        writer.error = CsvWriteError::InvalidDelimiter;
+        return writer.error;
+    }
+    if (length < 0 || (length > 0 && data == 0)) {
+        writer.error = CsvWriteError::InvalidInput;
+        return writer.error;
+    }
+
+    i64 extra = 0;
+    bool quote = needs_quotes(data, length, writer.delimiter);
+
+    if (writer.fields_in_record > 0) {
+        extra += 1;
+    }
+    if (quote) {
+        extra += 2;
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        if (quote && load(data + i) == 34) {
+            extra += 1;
+        }
+        i += 1;
+    }
+    if (length > writer.capacity - writer.length - extra) {
+        writer.error = CsvWriteError::OutputFull;
+        return writer.error;
+    }
+    if (writer.fields_in_record > 0 && !append(writer, writer.delimiter)) {
+        return writer.error;
+    }
+    if (quote && !append(writer, 34)) {
+        return writer.error;
+    }
+    i = 0;
+    while (i < length) {
+        i64 byte = load(data + i);
+
+        if (!append(writer, byte)) {
+            return writer.error;
+        }
+        if (quote && byte == 34 && !append(writer, 34)) {
+            return writer.error;
+        }
+        i += 1;
+    }
+    if (quote && !append(writer, 34)) {
+        return writer.error;
+    }
+    writer.fields_in_record += 1;
+    return CsvWriteError::None;
+}
+
+public fn end_record(CsvWriter&mut writer) -> CsvWriteError {
+    if (writer.error != CsvWriteError::None) {
+        return writer.error;
+    }
+    if (!append(writer, 13) || !append(writer, 10)) {
+        return writer.error;
+    }
+    writer.fields_in_record = 0;
+    writer.records += 1;
+    return CsvWriteError::None;
+}
+
+public fn written(CsvWriter& writer) -> i64 {
+    return writer.length;
+}
+
+public fn record_count(CsvWriter& writer) -> i64 {
+    return writer.records;
+}
+
+public fn error(CsvWriter& writer) -> CsvWriteError {
+    return writer.error;
+}

@@ -2,73 +2,188 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace websocket::handshake;
+
 import core::result;
 import std::encoding::base64;
 import std::random;
 
-public enum HandshakeError { InvalidKey, OutputFull, EntropyFailure, EncodingFailure }
+public enum HandshakeError {
+    InvalidKey,
+    OutputFull,
+    EntropyFailure,
+    EncodingFailure
+}
 
-fn load(usize p) -> i64 { unsafe { return (*((p)as u8*const))as i64; } }
-fn store(usize p, i64 v) { unsafe { *((p)as u8*mut) = v as u8; } }
-fn rol(u32 v, u32 n) -> u32 { return (v << n) | (v >> (32 - n)); }
+fn load(usize p) -> i64 {
+    unsafe {
+        return (*((p)as u8*const))as i64;
+    }
+}
+
+fn store(usize p, i64 v) {
+    unsafe {
+        *((p)as u8*mut) = v as u8;
+    }
+}
+
+fn rol(u32 v, u32 n) -> u32 {
+    return (v << n) | (v >> (32 - n));
+}
 
 fn sha1(usize data, i64 length, usize output20) {
-    u32 h0 = 0x67452301; u32 h1 = 0xefcdab89; u32 h2 = 0x98badcfe; u32 h3 = 0x10325476; u32 h4 = 0xc3d2e1f0;
+    u32 h0 = 0x67452301;
+    u32 h1 = 0xefcdab89;
+    u32 h2 = 0x98badcfe;
+    u32 h3 = 0x10325476;
+    u32 h4 = 0xc3d2e1f0;
     i64 total = ((length + 9 + 63) / 64) * 64;
     i64 block = 0;
+
     while (block < total) {
-        u32 w[80]; i64 i = 0;
+        u32 w[80];
+        i64 i = 0;
+
         while (i < 16) {
-            u32 word = 0; i64 j = 0;
+            u32 word = 0;
+            i64 j = 0;
+
             while (j < 4) {
-                i64 pos = block + i * 4 + j; i64 b = 0;
-                if (pos < length) { b = load(data + pos); }
-                else if (pos == length) { b = 128; }
-                else if (pos >= total - 8) {
-                    u64 bits = (length as u64) * 8; i64 s = (total - 1 - pos) * 8; b = ((bits >> (s as u32)) & 255) as i64;
+                i64 pos = block + i * 4 + j;
+                i64 b = 0;
+
+                if (pos < length) {
+                    b = load(data + pos);
+                } else if (pos == length) {
+                    b = 128;
+                } else if (pos >= total - 8) {
+                    u64 bits = (length as u64) * 8;
+                    i64 s = (total - 1 - pos) * 8;
+
+                    b = ((bits >> (s as u32)) & 255)as i64;
                 }
-                word = (word << 8) | (b as u32); j += 1;
+                word = (word << 8) | (b as u32);
+                j += 1;
             }
-            w[i] = word; i += 1;
+            w[i] = word;
+            i += 1;
         }
-        while (i < 80) { w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1); i += 1; }
-        u32 a=h0; u32 b=h1; u32 c=h2; u32 d=h3; u32 e=h4; i=0;
         while (i < 80) {
-            u32 f=0; u32 k=0;
-            if (i < 20) { f=(b & c) | ((b ^ 0xffffffff) & d); k=0x5a827999; }
-            else if (i < 40) { f=b ^ c ^ d; k=0x6ed9eba1; }
-            else if (i < 60) { f=(b & c) | (b & d) | (c & d); k=0x8f1bbcdc; }
-            else { f=b ^ c ^ d; k=0xca62c1d6; }
-            u32 temp=rol(a,5)+f+e+k+w[i]; e=d; d=c; c=rol(b,30); b=a; a=temp; i+=1;
+            w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+            i += 1;
         }
-        h0+=a; h1+=b; h2+=c; h3+=d; h4+=e; block+=64;
+
+        u32 a = h0;
+        u32 b = h1;
+        u32 c = h2;
+        u32 d = h3;
+        u32 e = h4;
+
+        i = 0;
+        while (i < 80) {
+            u32 f = 0;
+            u32 k = 0;
+
+            if (i < 20) {
+                f = (b & c) | ((b ^ 0xffffffff) & d);
+                k = 0x5a827999;
+            } else if (i < 40) {
+                f = b ^ c ^ d;
+                k = 0x6ed9eba1;
+            } else if (i < 60) {
+                f = (b & c) | (b & d) | (c & d);
+                k = 0x8f1bbcdc;
+            } else {
+                f = b ^ c ^ d;
+                k = 0xca62c1d6;
+            }
+
+            u32 temp = rol(a, 5) + f + e + k + w[i];
+
+            e = d;
+            d = c;
+            c = rol(b, 30);
+            b = a;
+            a = temp;
+            i += 1;
+        }
+        h0 += a;
+        h1 += b;
+        h2 += c;
+        h3 += d;
+        h4 += e;
+        block += 64;
     }
-    u32 words[5]=[h0,h1,h2,h3,h4]; i64 wi=0;
-    while (wi<5) { i64 j=0; while(j<4){ store(output20+wi*4+j, ((words[wi] >> ((24-j*8) as u32)) & 255) as i64); j+=1;} wi+=1; }
+
+    u32 words[5] = [h0, h1, h2, h3, h4];
+    i64 wi = 0;
+
+    while (wi<5) {
+        i64 j = 0;
+
+        while (j<4) {
+            store(output20 + wi*4 + j, ((words[wi] >> ((24 - j*8)as u32)) & 255)as i64);
+            j += 1;
+        }
+        wi += 1;
+    }
 }
 
 /// Creates the 24-byte base64 Sec-WebSocket-Key value for a client handshake.
 public fn generate_client_key(usize output, i64 capacity) -> Result<i64, HandshakeError> {
-    if (capacity < 24 || output == 0) { return Result<i64, HandshakeError>::Error(HandshakeError::OutputFull); }
+    if (capacity < 24 || output == 0) {
+        return Result<i64, HandshakeError>::Error(HandshakeError::OutputFull);
+    }
+
     u8 nonce[16];
-    if (!std::random::fill((&nonce[0]) as usize, 16)) { return Result<i64, HandshakeError>::Error(HandshakeError::EntropyFailure); }
-    match std::encoding::base64::encode((&nonce[0]) as usize, 16, output, capacity) {
-        Result<i64, std::encoding::base64::Base64Error>::Error(_) => { return Result<i64, HandshakeError>::Error(HandshakeError::EncodingFailure); }
-        Result<i64, std::encoding::base64::Base64Error>::Ok(written) => { return Result<i64, HandshakeError>::Ok(written); }
+
+    if (!std::random::fill((&nonce[0])as usize, 16)) {
+        return Result<i64, HandshakeError>::Error(HandshakeError::EntropyFailure);
+    }
+    match std::encoding::base64::encode((&nonce[0])as usize, 16, output, capacity) {
+        Result<i64, std::encoding::base64::Base64Error>::Error(_) => {
+            return Result<i64, HandshakeError>::Error(HandshakeError::EncodingFailure);
+        }
+        Result<i64, std::encoding::base64::Base64Error>::Ok(written) => {
+            return Result<i64, HandshakeError>::Ok(written);
+        }
     }
 }
 
 /// Computes Sec-WebSocket-Accept from an ASCII Sec-WebSocket-Key.
 public fn accept_key(usize key, i64 key_length, usize output, i64 capacity) -> Result<i64, HandshakeError> {
-    if (key == 0 || key_length <= 0 || key_length > 256) { return Result<i64, HandshakeError>::Error(HandshakeError::InvalidKey); }
-    if (capacity < 28 || output == 0) { return Result<i64, HandshakeError>::Error(HandshakeError::OutputFull); }
-    u8 joined[292]; i64 i=0;
-    while(i<key_length){ joined[i]=load(key+i) as u8; i+=1; }
-    i64 guid[36]=[50,53,56,69,65,70,65,53,45,69,57,49,52,45,52,55,68,65,45,57,53,67,65,45,67,53,65,66,48,68,67,56,53,66,49,49];
-    i64 j=0; while(j<36){ joined[i]=guid[j] as u8; i+=1; j+=1; }
-    u8 digest[20]; sha1((&joined[0]) as usize, i, (&digest[0]) as usize);
-    match std::encoding::base64::encode((&digest[0]) as usize, 20, output, capacity) {
-        Result<i64, std::encoding::base64::Base64Error>::Error(_) => { return Result<i64, HandshakeError>::Error(HandshakeError::EncodingFailure); }
-        Result<i64, std::encoding::base64::Base64Error>::Ok(written) => { return Result<i64, HandshakeError>::Ok(written); }
+    if (key == 0 || key_length <= 0 || key_length > 256) {
+        return Result<i64, HandshakeError>::Error(HandshakeError::InvalidKey);
+    }
+    if (capacity < 28 || output == 0) {
+        return Result<i64, HandshakeError>::Error(HandshakeError::OutputFull);
+    }
+
+    u8 joined[292];
+    i64 i = 0;
+
+    while (i<key_length) {
+        joined[i] = load(key + i)as u8;
+        i += 1;
+    }
+
+    i64 guid[36] = [50, 53, 56, 69, 65, 70, 65, 53, 45, 69, 57, 49, 52, 45, 52, 55, 68, 65, 45, 57, 53, 67, 65, 45, 67, 53, 65, 66, 48, 68, 67, 56, 53, 66, 49, 49];
+    i64 j = 0;
+
+    while (j<36) {
+        joined[i] = guid[j]as u8;
+        i += 1;
+        j += 1;
+    }
+
+    u8 digest[20];
+
+    sha1((&joined[0])as usize, i, (&digest[0])as usize);
+    match std::encoding::base64::encode((&digest[0])as usize, 20, output, capacity) {
+        Result<i64, std::encoding::base64::Base64Error>::Error(_) => {
+            return Result<i64, HandshakeError>::Error(HandshakeError::EncodingFailure);
+        }
+        Result<i64, std::encoding::base64::Base64Error>::Ok(written) => {
+            return Result<i64, HandshakeError>::Ok(written);
+        }
     }
 }

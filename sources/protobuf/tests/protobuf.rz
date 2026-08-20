@@ -1,0 +1,74 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import protobuf::error;
+import protobuf::reader;
+import protobuf::wire;
+import protobuf::writer;
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn main() -> i64 {
+    u8 output[64];
+    u8 text[3] = [114, 97, 122];
+    ProtobufWriter writer = protobuf::writer::create(&mut output[0]as usize, 64);
+
+    if (protobuf::writer::uint64(&mut writer, 1, 150) != ProtobufError::None) {
+        return 1;
+    }
+    if (protobuf::writer::string(&mut writer, 2, &text[0]as usize, 3) != ProtobufError::None) {
+        return 2;
+    }
+    if (protobuf::writer::sint64(&mut writer, 3, -7) != ProtobufError::None) {
+        return 3;
+    }
+    if (
+        protobuf::writer::written(&writer) != 10 ||
+        load(&output[0]as usize) != 8 ||
+        load(&output[1]as usize) != 150 ||
+        load(&output[2]as usize) != 1 ||
+        load(&output[3]as usize) != 18 ||
+        load(&output[4]as usize) != 3 ||
+        load(&output[8]as usize) != 24 ||
+        load(&output[9]as usize) != 13
+    ) {
+        return 4;
+    }
+
+    ProtobufReader reader = protobuf::reader::create(&output[0]as usize, protobuf::writer::written(&writer));
+    Field field;
+
+    if (
+        protobuf::reader::next(&mut reader, &mut field) != ProtobufError::None ||
+        field.number != 1 ||
+        field.varint_value != 150
+    ) {
+        return 5;
+    }
+    if (
+        protobuf::reader::next(&mut reader, &mut field) != ProtobufError::None ||
+        field.number != 2 ||
+        field.wire_type != WireType::LengthDelimited ||
+        field.payload.length != 3
+    ) {
+        return 6;
+    }
+
+    i64 signed_value = 0;
+
+    if (
+        protobuf::reader::next(&mut reader, &mut field) != ProtobufError::None ||
+        protobuf::reader::sint64(&field, &mut signed_value) != ProtobufError::None ||
+        signed_value != -7
+    ) {
+        return 7;
+    }
+    if (protobuf::reader::next(&mut reader, &mut field) != ProtobufError::End) {
+        return 8;
+    }
+    return 0;
+}

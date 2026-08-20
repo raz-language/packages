@@ -1,0 +1,42 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import protobuf::error;
+import protobuf::reader;
+import protobuf::wire;
+import protobuf::writer;
+
+fn main() -> i64 {
+    u8 truncated[2] = [8, 128];
+    ProtobufReader reader = protobuf::reader::create(&truncated[0]as usize, 2);
+    Field field;
+
+    if (protobuf::reader::next(&mut reader, &mut field) != ProtobufError::UnexpectedEnd) {
+        return 1;
+    }
+    if (protobuf::reader::position(&reader) != 0) {
+        return 2;
+    }
+
+    u8 zero_field[1] = [0];
+
+    reader = protobuf::reader::create(&zero_field[0]as usize, 1);
+    if (protobuf::reader::next(&mut reader, &mut field) != ProtobufError::InvalidFieldNumber) {
+        return 3;
+    }
+
+    u8 group[1] = [11];
+
+    reader = protobuf::reader::create(&group[0]as usize, 1);
+    if (protobuf::reader::next(&mut reader, &mut field) != ProtobufError::GroupsUnsupported) {
+        return 4;
+    }
+
+    u8 output[1];
+    ProtobufWriter writer = protobuf::writer::create(&mut output[0]as usize, 1);
+
+    if (protobuf::writer::uint64(&mut writer, 0, 1) != ProtobufError::InvalidFieldNumber) {
+        return 5;
+    }
+    return 0;
+}

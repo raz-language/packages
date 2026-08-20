@@ -1,0 +1,21 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import msgpack::error;
+import msgpack::writer;
+
+fn main() -> i64 {
+    u8 output[32];
+    MsgpackWriter writer = msgpack::writer::create(&mut output[0]as usize, 32);
+
+    if (msgpack::writer::map(&mut writer, 1) != MsgpackError::None) {
+        return 1;
+    }
+    if (msgpack::writer::unsigned(&mut writer, 1) != MsgpackError::None) {
+        return 2;
+    }
+    if (msgpack::writer::boolean(&mut writer, true) != MsgpackError::None) {
+        return 3;
+    }
+    return 0;
+}

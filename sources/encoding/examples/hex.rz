@@ -1,0 +1,23 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import encoding::hex;
+
+fn main() -> i64 {
+    u8 input[3] = [82, 97, 122];
+    u8 output[6];
+    i64 written = 0;
+
+    if (
+        encoding::hex::encode_lower(
+            &input[0]as usize,
+            3,
+            &mut output[0]as usize,
+            6,
+            &mut written
+        ) != HexError::None
+    ) {
+        return 1;
+    }
+    return written == 6?0: 2;
+}

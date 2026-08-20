@@ -1,3 +1,3 @@
 # jwt examples
 
-Small executable examples demonstrating stable `jwt` APIs live here.
+- `claims.rz` parses registered claims and applies time validation.

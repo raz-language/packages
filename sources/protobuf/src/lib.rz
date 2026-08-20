@@ -1,0 +1,9 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace protobuf;
+
+public import protobuf::error;
+public import protobuf::reader;
+public import protobuf::wire;
+public import protobuf::writer;

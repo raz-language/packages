@@ -1,0 +1,32 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace cbor::value;
+
+import core::bytes;
+
+public enum CborKind {
+    Unsigned,
+    Negative,
+    Bytes,
+    Text,
+    Array,
+    Map,
+    Tag,
+    False,
+    True,
+    Null,
+    Undefined,
+    Simple,
+    Float16,
+    Float32,
+    Float64,
+}
+
+public struct CborItem {
+    CborKind kind;
+    u64 argument;
+    BytesView payload;
+    i64 offset;
+    i64 header_length;
+}

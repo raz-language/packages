@@ -1,0 +1,19 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import testing::property;
+
+fn main() -> i64 {
+    PropertyRunner runner = testing::property::create(42, 100);
+    i64 value = 0;
+
+    while (testing::property::next(&mut runner)) {
+        if (!testing::property::range_i64(&mut runner, -100, 100, &mut value)) {
+            return 1;
+        }
+        if (value < -100 || value > 100) {
+            return 2;
+        }
+    }
+    return 0;
+}

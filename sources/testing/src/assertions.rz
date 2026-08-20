@@ -1,0 +1,155 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace testing::assertions;
+
+public enum FailureKind {
+    Condition,
+    EqualI64,
+    EqualU64,
+    EqualBytes,
+    NearF64,
+    RangeI64,
+}
+
+public struct Failure {
+    FailureKind kind;
+    i64 case_index;
+    i64 expected_i64;
+    i64 actual_i64;
+}
+
+public struct TestContext {
+    usize failures;
+    i64 failure_capacity;
+    i64 failure_count;
+    i64 assertions;
+    i64 current_case;
+    bool overflowed;
+}
+
+public fn create(usize failures, i64 capacity) -> TestContext {
+    return TestContext {
+        failures: failures,
+        failure_capacity: capacity,
+        failure_count: 0,
+        assertions: 0,
+        current_case: -1,
+        overflowed: false,
+    };
+}
+
+public fn set_case(TestContext&mut context, i64 case_index) {
+    context.current_case = case_index;
+}
+
+fn record(TestContext&mut context, FailureKind kind, i64 expected, i64 actual) -> bool {
+    context.assertions += 1;
+    if (context.failure_count >= context.failure_capacity || context.failures == 0) {
+        context.overflowed = true;
+        context.failure_count += 1;
+        return false;
+    }
+    unsafe {
+        *((context.failures + context.failure_count * (size_of<Failure>()as i64))as Failure*mut) = Failure {
+            kind: kind,
+            case_index: context.current_case,
+            expected_i64: expected,
+            actual_i64: actual,
+        };
+    }
+    context.failure_count += 1;
+    return false;
+}
+
+public fn expect(TestContext&mut context, bool condition) -> bool {
+    if (!condition) {
+        return record(context, FailureKind::Condition, 1, 0);
+    }
+    context.assertions += 1;
+    return true;
+}
+
+public fn equal_i64(TestContext&mut context, i64 expected, i64 actual) -> bool {
+    if (expected != actual) {
+        return record(context, FailureKind::EqualI64, expected, actual);
+    }
+    context.assertions += 1;
+    return true;
+}
+
+public fn equal_u64(TestContext&mut context, u64 expected, u64 actual) -> bool {
+    if (expected != actual) {
+        return record(context, FailureKind::EqualU64, expected as i64, actual as i64);
+    }
+    context.assertions += 1;
+    return true;
+}
+
+public fn equal_bytes(TestContext&mut context, usize expected, usize actual, i64 length) -> bool {
+    if (length < 0 || (length > 0 && (expected == 0 || actual == 0))) {
+        return record(context, FailureKind::EqualBytes, length, -1);
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        unsafe {
+            if (*((expected + i)as u8*const) != *((actual + i)as u8*const)) {
+                return record(context, FailureKind::EqualBytes, i, i);
+            }
+        }
+        i += 1;
+    }
+    context.assertions += 1;
+    return true;
+}
+
+public fn near_f64(TestContext&mut context, f64 expected, f64 actual, f64 tolerance) -> bool {
+    f64 difference = actual - expected;
+
+    if (difference < 0.0) {
+        difference = -difference;
+    }
+    if (tolerance < 0.0 || difference > tolerance) {
+        return record(context, FailureKind::NearF64, 0, 0);
+    }
+    context.assertions += 1;
+    return true;
+}
+
+public fn in_range_i64(TestContext&mut context, i64 value, i64 minimum, i64 maximum) -> bool {
+    if (minimum > maximum || value < minimum || value > maximum) {
+        return record(context, FailureKind::RangeI64, minimum, value);
+    }
+    context.assertions += 1;
+    return true;
+}
+
+public fn passed(TestContext& context) -> bool {
+    return context.failure_count == 0;
+}
+
+public fn assertion_count(TestContext& context) -> i64 {
+    return context.assertions;
+}
+
+public fn failure_count(TestContext& context) -> i64 {
+    return context.failure_count;
+}
+
+public fn failure_at(TestContext& context, i64 index) -> Failure*const {
+    if (
+        index < 0 ||
+        index >= context.failure_count ||
+        index >= context.failure_capacity ||
+        context.failures == 0
+    ) {
+        unsafe {
+            return 0 as Failure*const;
+        }
+    }
+    unsafe {
+        return (context.failures + index * (size_of<Failure>()as i64))as Failure*const;
+    }
+}

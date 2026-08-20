@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace crypto::hash::blake3;
+
 public const i64 DIGEST_SIZE = 32;
 public const i64 BLOCK_SIZE = 64;
 public const i64 CHUNK_SIZE = 1024;

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace crypto::secure;
+
 import std::random;
+
 /// Constant-work comparison for equal-length byte strings.
 public fn equal(usize left, usize right, i64 length) -> bool {
     if (length < 0 || (length > 0 && (left == 0 || right == 0))) {

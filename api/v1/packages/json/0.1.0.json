@@ -1,0 +1,14 @@
+{
+  "archive": "packages/json/0.1.0.dpk",
+  "checksum": "c6e7109f0bf1f621",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/json/0.1.0.dpk",
+  "metadata": {
+    "description": "A strict, allocation-conscious JSON toolkit for Raz."
+  },
+  "name": "json",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.1.0",
+  "yanked": false
+}

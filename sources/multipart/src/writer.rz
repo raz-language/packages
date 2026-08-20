@@ -1,0 +1,238 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace multipart::writer;
+
+import multipart::reader;
+import core::bytes;
+
+public enum MultipartWriteError {
+    None,
+    InvalidInput,
+    InvalidBoundary,
+    InvalidHeaderValue,
+    InvalidState,
+    OutputFull,
+}
+
+public struct MultipartWriter {
+    usize output;
+    i64 capacity;
+    i64 length;
+    BytesView boundary;
+    i64 parts;
+    bool finished;
+    MultipartWriteError error;
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+public fn create(usize output, i64 capacity, usize boundary, i64 boundary_length) -> MultipartWriter {
+    return MultipartWriter {
+        output: output,
+        capacity: capacity,
+        length: 0,
+        boundary: BytesView {
+            data: boundary,
+            length: boundary_length
+        },
+        parts: 0,
+        finished: false,
+        error: MultipartWriteError::None,
+    };
+}
+
+fn append(MultipartWriter&mut writer, i64 byte) -> bool {
+    if (writer.output == 0 || writer.length >= writer.capacity) {
+        return false;
+    }
+    unsafe {
+        *((writer.output + writer.length)as u8*mut) = byte as u8;
+    }
+    writer.length += 1;
+    return true;
+}
+
+fn append_bytes(MultipartWriter&mut writer, usize data, i64 length) -> bool {
+    i64 i = 0;
+
+    while (i < length) {
+        if (!append(writer, load(data + i))) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn append_values(MultipartWriter&mut writer, usize data, i64 length) -> bool {
+    return append_bytes(writer, data, length);
+}
+
+fn header_value(usize data, i64 length) -> bool {
+    if (length <= 0 || data == 0) {
+        return false;
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        i64 byte = load(data + i);
+
+        if (byte == 0 || byte == 10 || byte == 13 || byte == 34) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn begin_part(MultipartWriter&mut writer) -> bool {
+    if (writer.parts > 0 && (!append(writer, 13) || !append(writer, 10))) {
+        return false;
+    }
+    if (
+        !append(writer, 45) ||
+        !append(writer, 45) ||
+        !append_bytes(writer, writer.boundary.data, writer.boundary.length) ||
+        !append(writer, 13) ||
+        !append(writer, 10)
+    ) {
+        return false;
+    }
+    return true;
+}
+
+fn rollback(MultipartWriter&mut writer, i64 mark, MultipartWriteError error) -> MultipartWriteError {
+    writer.length = mark;
+    writer.error = error;
+    return error;
+}
+
+public fn field(
+    MultipartWriter&mut writer,
+    usize name,
+    i64 name_length,
+    usize value,
+    i64 value_length
+) -> MultipartWriteError {
+    if (writer.error != MultipartWriteError::None || writer.finished) {
+        return MultipartWriteError::InvalidState;
+    }
+    if (!multipart::reader::valid_boundary(writer.boundary.data, writer.boundary.length)) {
+        return rollback(writer, writer.length, MultipartWriteError::InvalidBoundary);
+    }
+    if (!header_value(name, name_length) || value_length < 0 || (value_length > 0 && value == 0)) {
+        return rollback(writer, writer.length, MultipartWriteError::InvalidHeaderValue);
+    }
+
+    i64 mark = writer.length;
+    u8 prefix[38] = [67, 111, 110, 116, 101, 110, 116, 45, 68, 105, 115, 112, 111, 115, 105, 116, 105, 111, 110, 58, 32, 102, 111, 114, 109, 45, 100, 97, 116, 97, 59, 32, 110, 97, 109, 101, 61, 34];
+
+    if (
+        !begin_part(writer) ||
+        !append_values(writer, (&prefix[0])as usize, 38) ||
+        !append_bytes(writer, name, name_length) ||
+        !append(writer, 34) ||
+        !append(writer, 13) ||
+        !append(writer, 10) ||
+        !append(writer, 13) ||
+        !append(writer, 10) ||
+        !append_bytes(writer, value, value_length)
+    ) {
+        return rollback(writer, mark, MultipartWriteError::OutputFull);
+    }
+    writer.parts += 1;
+    return MultipartWriteError::None;
+}
+
+public fn file(
+    MultipartWriter&mut writer,
+    usize name,
+    i64 name_length,
+    usize filename,
+    i64 filename_length,
+    usize content_type,
+    i64 content_type_length,
+    usize data,
+    i64 data_length,
+) -> MultipartWriteError {
+    if (writer.error != MultipartWriteError::None || writer.finished) {
+        return MultipartWriteError::InvalidState;
+    }
+    if (!multipart::reader::valid_boundary(writer.boundary.data, writer.boundary.length)) {
+        return rollback(writer, writer.length, MultipartWriteError::InvalidBoundary);
+    }
+    if (
+        !header_value(name, name_length) ||
+        !header_value(filename, filename_length) ||
+        !header_value(content_type, content_type_length) ||
+        data_length < 0 ||
+        (data_length > 0 && data == 0)
+    ) {
+        return rollback(writer, writer.length, MultipartWriteError::InvalidHeaderValue);
+    }
+
+    i64 mark = writer.length;
+    u8 disposition[38] = [67, 111, 110, 116, 101, 110, 116, 45, 68, 105, 115, 112, 111, 115, 105, 116, 105, 111, 110, 58, 32, 102, 111, 114, 109, 45, 100, 97, 116, 97, 59, 32, 110, 97, 109, 101, 61, 34];
+    u8 filename_prefix[12] = [59, 32, 102, 105, 108, 101, 110, 97, 109, 101, 61, 34];
+    u8 type_prefix[14] = [67, 111, 110, 116, 101, 110, 116, 45, 84, 121, 112, 101, 58, 32];
+
+    if (
+        !begin_part(writer) ||
+        !append_values(writer, (&disposition[0])as usize, 38) ||
+        !append_bytes(writer, name, name_length) ||
+        !append(writer, 34) ||
+        !append_values(writer, (&filename_prefix[0])as usize, 12) ||
+        !append_bytes(writer, filename, filename_length) ||
+        !append(writer, 34) ||
+        !append(writer, 13) ||
+        !append(writer, 10) ||
+        !append_values(writer, (&type_prefix[0])as usize, 14) ||
+        !append_bytes(writer, content_type, content_type_length) ||
+        !append(writer, 13) ||
+        !append(writer, 10) ||
+        !append(writer, 13) ||
+        !append(writer, 10) ||
+        !append_bytes(writer, data, data_length)
+    ) {
+        return rollback(writer, mark, MultipartWriteError::OutputFull);
+    }
+    writer.parts += 1;
+    return MultipartWriteError::None;
+}
+
+public fn finish(MultipartWriter&mut writer) -> MultipartWriteError {
+    if (writer.error != MultipartWriteError::None) {
+        return writer.error;
+    }
+    if (writer.finished || writer.parts <= 0) {
+        return MultipartWriteError::InvalidState;
+    }
+
+    i64 mark = writer.length;
+
+    if (
+        !append(writer, 13) ||
+        !append(writer, 10) ||
+        !append(writer, 45) ||
+        !append(writer, 45) ||
+        !append_bytes(writer, writer.boundary.data, writer.boundary.length) ||
+        !append(writer, 45) ||
+        !append(writer, 45) ||
+        !append(writer, 13) ||
+        !append(writer, 10)
+    ) {
+        return rollback(writer, mark, MultipartWriteError::OutputFull);
+    }
+    writer.finished = true;
+    return MultipartWriteError::None;
+}
+
+public fn written(MultipartWriter& writer) -> i64 {
+    return writer.length;
+}

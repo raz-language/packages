@@ -1,0 +1,172 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace json::pointer;
+
+import alloc::string;
+import core::bytes;
+import std::encoding::json::document;
+
+public enum PointerError {
+    None,
+    InvalidSyntax,
+    InvalidEscape,
+    InvalidIndex,
+    NotFound,
+    OutOfMemory,
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn decode_segment(usize data, i64 length, String&mut output) -> PointerError {
+    alloc::string::clear(output);
+
+    i64 i = 0;
+
+    while (i < length) {
+        i64 byte = load(data + i);
+
+        if (byte != 126) {
+            if (!alloc::string::push_byte(output, byte)) {
+                return PointerError::OutOfMemory;
+            }
+            i += 1;
+            continue;
+        }
+        if (i + 1 >= length) {
+            return PointerError::InvalidEscape;
+        }
+
+        i64 escaped = load(data + i + 1);
+
+        if (escaped == 48) {
+            byte = 126;
+        } else if (escaped == 49) {
+            byte = 47;
+        } else {
+            return PointerError::InvalidEscape;
+        }
+        if (!alloc::string::push_byte(output, byte)) {
+            return PointerError::OutOfMemory;
+        }
+        i += 2;
+    }
+    return PointerError::None;
+}
+
+fn array_index(String& segment, i64&mut output) -> bool {
+    i64 length = alloc::string::len(segment);
+
+    if (length <= 0) {
+        return false;
+    }
+
+    usize data = alloc::string::data_ptr(segment);
+
+    if (length > 1 && load(data) == 48) {
+        return false;
+    }
+
+    i64 value = 0;
+    i64 i = 0;
+
+    while (i < length) {
+        i64 byte = load(data + i);
+
+        if (byte < 48 || byte > 57) {
+            return false;
+        }
+
+        i64 digit = byte - 48;
+
+        if (value > 922337203685477580 || (value == 922337203685477580 && digit > 7)) {
+            return false;
+        }
+        value = value * 10 + digit;
+        i += 1;
+    }
+    *output = value;
+    return true;
+}
+
+/// Resolves RFC 6901 JSON Pointer bytes against a parsed document.
+/// `segment` and `key_scratch` are reusable caller-owned strings.
+public fn resolve(
+    JsonDocument& document,
+    usize pointer,
+    i64 length,
+    String&mut segment,
+    String&mut key_scratch,
+    i64&mut output,
+) -> PointerError {
+    *output = -1;
+    if (length < 0 || (length > 0 && pointer == 0)) {
+        return PointerError::InvalidSyntax;
+    }
+
+    i64 current = std::encoding::json::document::root_index(document);
+
+    if (length == 0) {
+        *output = current;
+        return PointerError::None;
+    }
+    if (load(pointer) != 47) {
+        return PointerError::InvalidSyntax;
+    }
+
+    i64 cursor = 1;
+
+    while (true) {
+        i64 start = cursor;
+
+        while (cursor < length && load(pointer + cursor) != 47) {
+            cursor += 1;
+        }
+
+        PointerError decoded = decode_segment(pointer + start, cursor - start, segment);
+
+        if (decoded != PointerError::None) {
+            return decoded;
+        }
+
+        JsonValueKind kind;
+
+        if (!std::encoding::json::document::kind_at(document, current, &mut kind)) {
+            return PointerError::NotFound;
+        }
+        if (kind == JsonValueKind::Object) {
+            current = std::encoding::json::document::object_get(
+                document,
+                current,
+                alloc::string::data_ptr(segment),
+                alloc::string::len(segment),
+                key_scratch,
+            );
+            if (current < 0) {
+                return PointerError::NotFound;
+            }
+        } else if (kind == JsonValueKind::Array) {
+            i64 index = 0;
+
+            if (!array_index(segment, &mut index)) {
+                return PointerError::InvalidIndex;
+            }
+            current = std::encoding::json::document::array_get(document, current, index);
+            if (current < 0) {
+                return PointerError::NotFound;
+            }
+        } else {
+            return PointerError::NotFound;
+        }
+        if (cursor >= length) {
+            break;
+        }
+        cursor += 1;
+    }
+    *output = current;
+    return PointerError::None;
+}

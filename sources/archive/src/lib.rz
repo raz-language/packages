@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace archive;
-// Public package surface. Implementations are added behind this facade as the package matures.
+
+public import archive::path;
+public import archive::tar;
+public import archive::zip;
+
 public fn version_major() -> i64 {
     return 0;
 }

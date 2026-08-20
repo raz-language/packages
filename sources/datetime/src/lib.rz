@@ -2,12 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace datetime;
+
 public import datetime::calendar;
 public import datetime::types;
 public import datetime::duration;
 public import datetime::timestamp;
 public import datetime::rfc3339;
 
-public fn version_major() -> i64 { return 0; }
-public fn version_minor() -> i64 { return 2; }
-public fn version_patch() -> i64 { return 0; }
+public fn version_major() -> i64 {
+    return 0;
+}
+
+public fn version_minor() -> i64 {
+    return 2;
+}
+
+public fn version_patch() -> i64 {
+    return 0;
+}

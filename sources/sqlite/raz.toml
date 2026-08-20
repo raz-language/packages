@@ -8,6 +8,8 @@ kind = "static-library"
 entry = "src/lib.rz"
 
 [dependencies]
+alloc = "../../../raz/library/packages/alloc"
+core = "../../../raz/library/packages/core"
 
 [native]
 libraries = ["sqlite3"]

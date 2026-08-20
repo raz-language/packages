@@ -1,0 +1,14 @@
+{
+  "archive": "packages/testing/0.1.0.dpk",
+  "checksum": "0f4b0b4a5bdd3e59",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/testing/0.1.0.dpk",
+  "metadata": {
+    "description": "Reusable assertions, deterministic property generators, shrinking, and benchmark statistics for Raz."
+  },
+  "name": "testing",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.1.0",
+  "yanked": false
+}

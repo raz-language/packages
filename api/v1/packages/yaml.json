@@ -1,0 +1,22 @@
+{
+  "name": "yaml",
+  "owners": [
+    "raz-language"
+  ],
+  "versions": [
+    {
+      "archive": "packages/yaml/0.1.0.dpk",
+      "checksum": "7146bbb29663e50b",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/yaml/0.1.0.dpk",
+      "metadata": {
+        "description": "A bounded block-style YAML 1.2 core for Raz."
+      },
+      "name": "yaml",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.1.0",
+      "yanked": false
+    }
+  ]
+}

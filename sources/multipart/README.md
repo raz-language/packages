@@ -1,16 +1,10 @@
 # multipart
 
-MIME multipart and form-data support for Raz.
+Streaming MIME multipart/form-data support for Raz.
 
-> **Status:** initial package scaffold. The public API is not stable yet.
+Version 0.1.0 implements strict boundary validation, zero-copy part iteration, bounded header scanning, form field and file metadata extraction, configurable part/header limits, and a transactional caller-buffer writer.
 
-## Goals
-
-- [ ] boundary parser
-- [ ] streaming multipart reader
-- [ ] form-data fields
-- [ ] file parts
-- [ ] multipart writer
+The reader recognizes quoted `name` and `filename` parameters, exposes the complete borrowed header block, and returns file content type when present. The writer rejects CR/LF and quote injection in disposition parameters and rolls its logical length back if a part cannot fit.
 
 ## Dependencies
 
@@ -18,8 +12,6 @@ None.
 
 ## Design rules
 
-- Native Raz implementation wherever practical.
-- Explicit errors through `Result` for recoverable failures.
-- Avoid hidden allocations on hot paths.
-- Keep the public surface small and composable.
-- Add malformed/adversarial-input tests for parser, protocol, and security code.
+- No hidden allocation or input copies.
+- CRLF framing and final-boundary handling are validated explicitly.
+- Resource limits are part of the reader state rather than global policy.

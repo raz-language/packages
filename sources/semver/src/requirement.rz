@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace semver::requirement;
+
 import semver::version;
 
 fn byte_at(usize data, i64 index) -> u8 {

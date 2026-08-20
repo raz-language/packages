@@ -1,11 +1,22 @@
+archive	0.1.0	raz-language	Safe, allocation-free archive format primitives for Raz.
+cbor	0.1.0	raz-language	An allocation-free CBOR codec for Raz.
 crypto	0.4.0	raz-language	Cryptographic primitives and secure utilities for Raz.
+csv	0.1.0	raz-language	A streaming, zero-copy CSV reader and allocation-free writer for Raz.
 datetime	0.2.0	raz-language	High-performance civil date/time, UTC offset, duration, Unix timestamp, and RFC 3339 utilities for Raz.
+encoding	0.1.0	raz-language	Allocation-free binary-to-text codecs and checksums for Raz.
 http-router	0.2.0	raz-language	High-performance, allocation-conscious HTTP routing for Raz.
+json	0.1.0	raz-language	A strict, allocation-conscious JSON toolkit for Raz.
+jwt	0.1.0	raz-language	JWT, JWS, registered-claim, and JWK support for Raz.
+msgpack	0.1.0	raz-language	An allocation-free MessagePack codec for Raz.
+multipart	0.1.0	raz-language	Streaming MIME multipart/form-data support for Raz.
 postgres	0.3.0	raz-language	Native PostgreSQL wire-protocol client for Raz.
+protobuf	0.1.0	raz-language	An allocation-free Protocol Buffers wire codec for Raz.
 regex	0.2.1	raz-language	`regex` is the official allocation-conscious regular-expression package for Raz.
 semver	0.2.0	raz-language	Strict Semantic Versioning 2.0.0 parsing, precedence, and package-manager version requirements for Raz.
 serde	0.2.0	raz-language	`serde` defines Raz's format-neutral serialization contracts.
 sqlite	0.3.0	raz-language	Native SQLite integration for Raz with an allocation-conscious Raz API over SQLite's stable C ABI.
+testing	0.1.0	raz-language	Reusable assertions, deterministic property generators, shrinking, and benchmark statistics for Raz.
 toml	0.2.0	raz-language	Native TOML parsing for Raz, designed around source-backed documents and low allocation overhead.
 uuid	0.2.0	raz-language	Fast UUID primitives for Raz.
 websocket	0.2.0	raz-language	RFC 6455 WebSocket protocol primitives for Raz.
+yaml	0.1.0	raz-language	A bounded block-style YAML 1.2 core for Raz.

@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace multipart;
-// Public package surface. Implementations are added behind this facade as the package matures.
+
+public import multipart::reader;
+public import multipart::writer;
+
 public fn version_major() -> i64 {
     return 0;
 }

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace crypto::mac::hmac;
+
 import crypto::hash::sha256;
+
 public const i64 SHA256_SIZE = 32;
 
 public struct HmacSha256 {

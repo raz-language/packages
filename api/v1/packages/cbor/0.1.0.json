@@ -1,0 +1,14 @@
+{
+  "archive": "packages/cbor/0.1.0.dpk",
+  "checksum": "eaa326a7a88b2eb4",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/cbor/0.1.0.dpk",
+  "metadata": {
+    "description": "An allocation-free CBOR codec for Raz."
+  },
+  "name": "cbor",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.1.0",
+  "yanked": false
+}

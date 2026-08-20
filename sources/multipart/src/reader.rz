@@ -1,0 +1,446 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace multipart::reader;
+
+import core::bytes;
+
+public enum MultipartError {
+    None,
+    End,
+    InvalidInput,
+    InvalidBoundary,
+    MissingInitialBoundary,
+    Truncated,
+    HeaderTooLarge,
+    TooManyParts,
+    MalformedHeader,
+    MalformedDisposition,
+}
+
+public struct Part {
+    BytesView headers;
+    BytesView body;
+    BytesView name;
+    BytesView filename;
+    BytesView content_type;
+    i64 index;
+}
+
+public struct MultipartReader {
+    BytesView source;
+    BytesView boundary;
+    i64 cursor;
+    i64 parts;
+    i64 max_parts;
+    i64 max_header_bytes;
+    bool initialized;
+    bool done;
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn lower(i64 byte) -> i64 {
+    if (byte >= 65 && byte <= 90) {
+        return byte + 32;
+    }
+    return byte;
+}
+
+fn boundary_byte(i64 byte) -> bool {
+    if ((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)) {
+        return true;
+    }
+    return byte == 39 ||
+        byte == 40 ||
+        byte == 41 ||
+        byte == 43 ||
+        byte == 95 ||
+        byte == 44 ||
+        byte == 45 ||
+        byte == 46 ||
+        byte == 47 ||
+        byte == 58 ||
+        byte == 61 ||
+        byte == 63;
+}
+
+public fn valid_boundary(usize data, i64 length) -> bool {
+    if (data == 0 || length <= 0 || length > 70) {
+        return false;
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        if (!boundary_byte(load(data + i))) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+public fn create(usize body, i64 length, usize boundary, i64 boundary_length) -> MultipartReader {
+    return MultipartReader {
+        source: BytesView {
+            data: body,
+            length: length
+        },
+        boundary: BytesView {
+            data: boundary,
+            length: boundary_length
+        },
+        cursor: 0,
+        parts: 0,
+        max_parts: 1024,
+        max_header_bytes: 32768,
+        initialized: false,
+        done: length == 0,
+    };
+}
+
+public fn set_limits(MultipartReader&mut reader, i64 max_parts, i64 max_header_bytes) -> bool {
+    if (max_parts <= 0 || max_header_bytes <= 0) {
+        return false;
+    }
+    reader.max_parts = max_parts;
+    reader.max_header_bytes = max_header_bytes;
+    return true;
+}
+
+fn bytes_equal(usize left, usize right, i64 length) -> bool {
+    i64 i = 0;
+
+    while (i < length) {
+        if (load(left + i) != load(right + i)) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn find_crlf(usize data, i64 start, i64 length) -> i64 {
+    i64 i = start;
+
+    while (i + 1 < length) {
+        if (load(data + i) == 13 && load(data + i + 1) == 10) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn find_header_end(usize data, i64 start, i64 length, i64 limit) -> i64 {
+    i64 end = start + limit;
+
+    if (end > length) {
+        end = length;
+    }
+
+    i64 i = start;
+
+    while (i + 3 < end) {
+        if (
+            load(data + i) == 13 &&
+            load(data + i + 1) == 10 &&
+            load(data + i + 2) == 13 &&
+            load(data + i + 3) == 10
+        ) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn find_boundary(MultipartReader& reader, i64 start) -> i64 {
+    i64 required = 4 + reader.boundary.length;
+    i64 i = start;
+
+    while (i <= reader.source.length - required) {
+        if (
+            load(reader.source.data + i) == 13 &&
+            load(reader.source.data + i + 1) == 10 &&
+            load(reader.source.data + i + 2) == 45 &&
+            load(reader.source.data + i + 3) == 45 &&
+            bytes_equal(reader.source.data + i + 4, reader.boundary.data, reader.boundary.length)
+        ) {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn literal(usize data, i64 length, usize expected, i64 expected_length) -> bool {
+    if (length != expected_length) {
+        return false;
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        if (lower(load(data + i)) != load(expected + i)) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn trim(usize data, i64&mut start, i64&mut end) {
+    while (*start < *end && (load(data + *start) == 32 || load(data + *start) == 9)) {
+        *start += 1;
+    }
+    while (*end > *start && (load(data + *end - 1) == 32 || load(data + *end - 1) == 9)) {
+        *end -= 1;
+    }
+}
+
+fn parameter(BytesView value, usize expected, i64 expected_length) -> BytesView {
+    i64 cursor = 0;
+
+    while (cursor < value.length) {
+        while (
+            cursor < value.length &&
+            (
+                load(value.data + cursor) == 32 ||
+                load(value.data + cursor) == 9 ||
+                load(value.data + cursor) == 59
+            )
+        ) {
+            cursor += 1;
+        }
+
+        i64 key_start = cursor;
+
+        while (cursor < value.length && load(value.data + cursor) != 61 && load(value.data + cursor) != 59) {
+            cursor += 1;
+        }
+
+        i64 key_end = cursor;
+
+        trim(value.data, &mut key_start, &mut key_end);
+        if (cursor >= value.length || load(value.data + cursor) != 61) {
+            while (cursor < value.length && load(value.data + cursor) != 59) {
+                cursor += 1;
+            }
+            continue;
+        }
+        cursor += 1;
+        while (cursor < value.length && (load(value.data + cursor) == 32 || load(value.data + cursor) == 9)) {
+            cursor += 1;
+        }
+
+        i64 item_start = cursor;
+        i64 item_end = cursor;
+
+        if (cursor < value.length && load(value.data + cursor) == 34) {
+            item_start = cursor + 1;
+            cursor += 1;
+            while (cursor < value.length && load(value.data + cursor) != 34) {
+                cursor += 1;
+            }
+            item_end = cursor;
+            if (cursor < value.length) {
+                cursor += 1;
+            }
+        } else {
+            while (cursor < value.length && load(value.data + cursor) != 59) {
+                cursor += 1;
+            }
+            item_end = cursor;
+            trim(value.data, &mut item_start, &mut item_end);
+        }
+        if (literal(value.data + key_start, key_end - key_start, expected, expected_length)) {
+            return BytesView {
+                data: value.data + item_start,
+                length: item_end - item_start
+            };
+        }
+    }
+    return BytesView {
+        data: 0,
+        length: 0
+    };
+}
+
+fn parse_headers(BytesView headers, Part&mut part) -> MultipartError {
+    u8 disposition_name[19] = [99, 111, 110, 116, 101, 110, 116, 45, 100, 105, 115, 112, 111, 115, 105, 116, 105, 111, 110];
+    u8 content_type_name[12] = [99, 111, 110, 116, 101, 110, 116, 45, 116, 121, 112, 101];
+    u8 name_key[4] = [110, 97, 109, 101];
+    u8 filename_key[8] = [102, 105, 108, 101, 110, 97, 109, 101];
+    i64 cursor = 0;
+    bool disposition = false;
+
+    while (cursor < headers.length) {
+        i64 line_end = find_crlf(headers.data, cursor, headers.length);
+
+        if (line_end < 0) {
+            line_end = headers.length;
+        }
+
+        i64 colon = cursor;
+
+        while (colon < line_end && load(headers.data + colon) != 58) {
+            colon += 1;
+        }
+        if (colon == line_end) {
+            return MultipartError::MalformedHeader;
+        }
+
+        i64 name_start = cursor;
+        i64 name_end = colon;
+
+        trim(headers.data, &mut name_start, &mut name_end);
+
+        i64 value_start = colon + 1;
+        i64 value_end = line_end;
+
+        trim(headers.data, &mut value_start, &mut value_end);
+        BytesView value = BytesView {
+            data: headers.data + value_start,
+            length: value_end - value_start
+        };
+        if (literal(headers.data + name_start, name_end - name_start, (&disposition_name[0])as usize, 19)) {
+            disposition = true;
+            part.name = parameter(value, (&name_key[0])as usize, 4);
+            part.filename = parameter(value, (&filename_key[0])as usize, 8);
+        } else if (
+            literal(headers.data + name_start, name_end - name_start, (&content_type_name[0])as usize, 12)
+        ) {
+            part.content_type = value;
+        }
+        cursor = line_end + 2;
+    }
+    if (!disposition || part.name.length <= 0) {
+        return MultipartError::MalformedDisposition;
+    }
+    return MultipartError::None;
+}
+
+fn initialize(MultipartReader&mut reader) -> MultipartError {
+    if (!valid_boundary(reader.boundary.data, reader.boundary.length)) {
+        return MultipartError::InvalidBoundary;
+    }
+    if (reader.source.length < 0 || (reader.source.length > 0 && reader.source.data == 0)) {
+        return MultipartError::InvalidInput;
+    }
+
+    i64 marker = 2 + reader.boundary.length;
+
+    if (
+        reader.source.length < marker + 2 ||
+        load(reader.source.data) != 45 ||
+        load(reader.source.data + 1) != 45 ||
+        !bytes_equal(reader.source.data + 2, reader.boundary.data, reader.boundary.length)
+    ) {
+        return MultipartError::MissingInitialBoundary;
+    }
+    if (load(reader.source.data + marker) == 45 && load(reader.source.data + marker + 1) == 45) {
+        reader.done = true;
+        reader.initialized = true;
+        return MultipartError::End;
+    }
+    if (load(reader.source.data + marker) != 13 || load(reader.source.data + marker + 1) != 10) {
+        return MultipartError::MissingInitialBoundary;
+    }
+    reader.cursor = marker + 2;
+    reader.initialized = true;
+    reader.done = false;
+    return MultipartError::None;
+}
+
+public fn next(MultipartReader&mut reader, Part&mut output) -> MultipartError {
+    if (!reader.initialized) {
+        MultipartError initial = initialize(reader);
+
+        if (initial != MultipartError::None) {
+            return initial;
+        }
+    }
+    if (reader.done) {
+        return MultipartError::End;
+    }
+    if (reader.parts >= reader.max_parts) {
+        return MultipartError::TooManyParts;
+    }
+    i64 header_end = find_header_end(
+        reader.source.data,
+        reader.cursor,
+        reader.source.length,
+        reader.max_header_bytes + 4
+    );
+    if (header_end < 0) {
+        if (reader.cursor + reader.max_header_bytes < reader.source.length) {
+            return MultipartError::HeaderTooLarge;
+        }
+        return MultipartError::Truncated;
+    }
+
+    i64 body_start = header_end + 4;
+    i64 marker = find_boundary(reader, body_start);
+
+    if (marker < 0) {
+        return MultipartError::Truncated;
+    }
+    *output = Part {
+        headers: BytesView {
+            data: reader.source.data + reader.cursor,
+            length: header_end - reader.cursor
+        },
+        body: BytesView {
+            data: reader.source.data + body_start,
+            length: marker - body_start
+        },
+        name: BytesView {
+            data: 0,
+            length: 0
+        },
+        filename: BytesView {
+            data: 0,
+            length: 0
+        },
+        content_type: BytesView {
+            data: 0,
+            length: 0
+        },
+        index: reader.parts,
+    };
+
+    MultipartError parsed = parse_headers(output.headers, output);
+
+    if (parsed != MultipartError::None) {
+        return parsed;
+    }
+
+    i64 suffix = marker + 4 + reader.boundary.length;
+
+    if (suffix + 1 >= reader.source.length) {
+        return MultipartError::Truncated;
+    }
+    if (load(reader.source.data + suffix) == 45 && load(reader.source.data + suffix + 1) == 45) {
+        reader.done = true;
+        reader.cursor = suffix + 2;
+        if (
+            reader.cursor + 2 <= reader.source.length &&
+            load(reader.source.data + reader.cursor) == 13 &&
+            load(reader.source.data + reader.cursor + 1) == 10
+        ) {
+            reader.cursor += 2;
+        }
+    } else if (load(reader.source.data + suffix) == 13 && load(reader.source.data + suffix + 1) == 10) {
+        reader.cursor = suffix + 2;
+    } else {
+        return MultipartError::Truncated;
+    }
+    reader.parts += 1;
+    return MultipartError::None;
+}

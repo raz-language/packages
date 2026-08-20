@@ -1,0 +1,80 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import msgpack::error;
+import msgpack::reader;
+import msgpack::value;
+import msgpack::writer;
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn main() -> i64 {
+    u8 output[64];
+    u8 name[3] = [114, 97, 122];
+    MsgpackWriter writer = msgpack::writer::create(&mut output[0]as usize, 64);
+
+    if (msgpack::writer::array(&mut writer, 3) != MsgpackError::None) {
+        return 1;
+    }
+    if (msgpack::writer::unsigned(&mut writer, 200) != MsgpackError::None) {
+        return 2;
+    }
+    if (msgpack::writer::signed(&mut writer, -33) != MsgpackError::None) {
+        return 3;
+    }
+    if (msgpack::writer::string(&mut writer, &name[0]as usize, 3) != MsgpackError::None) {
+        return 4;
+    }
+    if (
+        msgpack::writer::written(&writer) != 9 ||
+        load(&output[0]as usize) != 147 ||
+        load(&output[1]as usize) != 204 ||
+        load(&output[2]as usize) != 200 ||
+        load(&output[3]as usize) != 208 ||
+        load(&output[4]as usize) != 223 ||
+        load(&output[5]as usize) != 163
+    ) {
+        return 5;
+    }
+
+    MsgpackReader reader = msgpack::reader::create(&output[0]as usize, msgpack::writer::written(&writer));
+    MsgpackItem item;
+    i64 integer = 0;
+
+    if (
+        msgpack::reader::next(&mut reader, &mut item) != MsgpackError::None ||
+        item.kind != MsgpackKind::Array ||
+        item.count != 3
+    ) {
+        return 6;
+    }
+    if (
+        msgpack::reader::next(&mut reader, &mut item) != MsgpackError::None ||
+        msgpack::reader::integer(&item, &mut integer) != MsgpackError::None ||
+        integer != 200
+    ) {
+        return 7;
+    }
+    if (
+        msgpack::reader::next(&mut reader, &mut item) != MsgpackError::None ||
+        msgpack::reader::integer(&item, &mut integer) != MsgpackError::None ||
+        integer != -33
+    ) {
+        return 8;
+    }
+    if (
+        msgpack::reader::next(&mut reader, &mut item) != MsgpackError::None ||
+        item.kind != MsgpackKind::String ||
+        item.payload.length != 3
+    ) {
+        return 9;
+    }
+    if (msgpack::reader::next(&mut reader, &mut item) != MsgpackError::End) {
+        return 10;
+    }
+    return 0;
+}

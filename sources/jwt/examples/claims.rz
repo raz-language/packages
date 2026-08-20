@@ -1,0 +1,15 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import jwt::claims;
+import jwt::error;
+
+fn main() -> i64 {
+    u8 payload[29] = [123, 34, 115, 117, 98, 34, 58, 34, 52, 50, 34, 44, 34, 101, 120, 112, 34, 58, 50, 48, 48, 48, 48, 48, 48, 48, 48, 48, 125];
+    RegisteredClaims claims;
+
+    if (jwt::claims::parse(&payload[0]as usize, 29, &mut claims) != JwtError::None) {
+        return 1;
+    }
+    return jwt::claims::validate_time(&claims, 1900000000, 30) == JwtError::None?0: 2;
+}

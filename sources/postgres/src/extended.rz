@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace postgres::extended;
+
 import core::result;
 import std::net;
-import postgres::wire;
+import postgres::wire as wire;
 import postgres::client;
+import postgres::client as client;
 
 public enum ExtendedError {
     InvalidState,
@@ -13,7 +15,7 @@ public enum ExtendedError {
     Send
 }
 
-fn send_frame(client::Client& c, usize data, i64 length) -> Result<bool, ExtendedError> {
+fn send_frame(postgres::client::Client& c, usize data, i64 length) -> Result<bool, ExtendedError> {
     if (std::net::send_all(c.socket, data, length) != length) {
         return Result<bool, ExtendedError>::Error(ExtendedError::Send);
     }
@@ -23,7 +25,7 @@ fn send_frame(client::Client& c, usize data, i64 length) -> Result<bool, Extende
 /// Sends Parse + Bind + Describe(statement) + Execute + Sync using one reusable caller buffer.
 /// This intentionally does not wait for responses; receive/framing remains independently drivable.
 public fn send_text_query(
-    client::Client&mut c,
+    postgres::client::Client&mut c,
     usize buffer,
     i64 capacity,
     usize statement,
@@ -34,7 +36,7 @@ public fn send_text_query(
     i64 value_count,
     i64 max_rows,
 ) -> Result<bool, ExtendedError> {
-    if (c.state != client::State::Ready || c.socket < 0) {
+    if (c.state != State::Ready || c.socket < 0) {
         return Result<bool, ExtendedError>::Error(ExtendedError::InvalidState);
     }
 
@@ -43,37 +45,52 @@ public fn send_text_query(
     if (frame.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::OutputFull);
     }
-    if (send_frame(c, buffer, frame.unwrap()).is_error()) {
+
+    auto parse_sent = send_frame(c, buffer, frame.unwrap());
+
+    if (parse_sent.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::Send);
     }
     frame = wire::write_bind_text(buffer, capacity, 0, 0, statement, statement_length, values, value_count);
     if (frame.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::OutputFull);
     }
-    if (send_frame(c, buffer, frame.unwrap()).is_error()) {
+
+    auto bind_sent = send_frame(c, buffer, frame.unwrap());
+
+    if (bind_sent.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::Send);
     }
     frame = wire::write_describe_statement(buffer, capacity, statement, statement_length);
     if (frame.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::OutputFull);
     }
-    if (send_frame(c, buffer, frame.unwrap()).is_error()) {
+
+    auto describe_sent = send_frame(c, buffer, frame.unwrap());
+
+    if (describe_sent.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::Send);
     }
     frame = wire::write_execute(buffer, capacity, 0, 0, max_rows);
     if (frame.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::OutputFull);
     }
-    if (send_frame(c, buffer, frame.unwrap()).is_error()) {
+
+    auto execute_sent = send_frame(c, buffer, frame.unwrap());
+
+    if (execute_sent.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::Send);
     }
     frame = wire::write_sync(buffer, capacity);
     if (frame.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::OutputFull);
     }
-    if (send_frame(c, buffer, frame.unwrap()).is_error()) {
+
+    auto sync_sent = send_frame(c, buffer, frame.unwrap());
+
+    if (sync_sent.is_error()) {
         return Result<bool, ExtendedError>::Error(ExtendedError::Send);
     }
-    c.state = client::State::Querying;
+    c.state = State::Querying;
     return Result<bool, ExtendedError>::Ok(true);
 }

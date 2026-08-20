@@ -1,0 +1,18 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace cbor::error;
+
+public enum CborError {
+    None,
+    End,
+    InvalidInput,
+    UnexpectedEnd,
+    InvalidAdditionalInfo,
+    IndefiniteUnsupported,
+    LengthOverflow,
+    IntegerOverflow,
+    DepthExceeded,
+    TypeMismatch,
+    OutputFull,
+}

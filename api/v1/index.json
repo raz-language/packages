@@ -1,6 +1,30 @@
 {
   "packages": [
     {
+      "description": "Safe, allocation-free archive format primitives for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "archive",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
+      ]
+    },
+    {
+      "description": "An allocation-free CBOR codec for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "cbor",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
+      ]
+    },
+    {
       "description": "Cryptographic primitives and secure utilities for Raz.",
       "latest": "0.4.0",
       "license": "",
@@ -12,6 +36,18 @@
         "0.2.0",
         "0.3.0",
         "0.4.0"
+      ]
+    },
+    {
+      "description": "A streaming, zero-copy CSV reader and allocation-free writer for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "csv",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
       ]
     },
     {
@@ -27,6 +63,18 @@
       ]
     },
     {
+      "description": "Allocation-free binary-to-text codecs and checksums for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "encoding",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
+      ]
+    },
+    {
       "description": "High-performance, allocation-conscious HTTP routing for Raz.",
       "latest": "0.2.0",
       "license": "",
@@ -36,6 +84,54 @@
       ],
       "versions": [
         "0.2.0"
+      ]
+    },
+    {
+      "description": "A strict, allocation-conscious JSON toolkit for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "json",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
+      ]
+    },
+    {
+      "description": "JWT, JWS, registered-claim, and JWK support for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "jwt",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
+      ]
+    },
+    {
+      "description": "An allocation-free MessagePack codec for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "msgpack",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
+      ]
+    },
+    {
+      "description": "Streaming MIME multipart/form-data support for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "multipart",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
       ]
     },
     {
@@ -49,6 +145,18 @@
       "versions": [
         "0.2.0",
         "0.3.0"
+      ]
+    },
+    {
+      "description": "An allocation-free Protocol Buffers wire codec for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "protobuf",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
       ]
     },
     {
@@ -102,6 +210,18 @@
       ]
     },
     {
+      "description": "Reusable assertions, deterministic property generators, shrinking, and benchmark statistics for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "testing",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
+      ]
+    },
+    {
       "description": "Native TOML parsing for Raz, designed around source-backed documents and low allocation overhead.",
       "latest": "0.2.0",
       "license": "",
@@ -135,6 +255,18 @@
       ],
       "versions": [
         "0.2.0"
+      ]
+    },
+    {
+      "description": "A bounded block-style YAML 1.2 core for Raz.",
+      "latest": "0.1.0",
+      "license": "",
+      "name": "yaml",
+      "owners": [
+        "raz-language"
+      ],
+      "versions": [
+        "0.1.0"
       ]
     }
   ],

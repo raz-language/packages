@@ -1,0 +1,14 @@
+{
+  "archive": "packages/multipart/0.1.0.dpk",
+  "checksum": "23a57605277aa890",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/multipart/0.1.0.dpk",
+  "metadata": {
+    "description": "Streaming MIME multipart/form-data support for Raz."
+  },
+  "name": "multipart",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.1.0",
+  "yanked": false
+}

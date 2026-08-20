@@ -2,86 +2,111 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace datetime::types;
+
 import datetime::calendar;
 
 public struct Time {
-  i64 hour;
-  i64 minute;
-  i64 second;
-  i64 nanosecond;
+    i64 hour;
+    i64 minute;
+    i64 second;
+    i64 nanosecond;
 }
 
 public struct DateTime {
-  i64 year;
-  i64 month;
-  i64 day;
-  i64 hour;
-  i64 minute;
-  i64 second;
-  i64 nanosecond;
+    i64 year;
+    i64 month;
+    i64 day;
+    i64 hour;
+    i64 minute;
+    i64 second;
+    i64 nanosecond;
 }
 
 public struct UtcOffset {
-  i64 seconds;
+    i64 seconds;
 }
 
 public struct OffsetDateTime {
-  i64 year;
-  i64 month;
-  i64 day;
-  i64 hour;
-  i64 minute;
-  i64 second;
-  i64 nanosecond;
-  i64 offset_seconds;
+    i64 year;
+    i64 month;
+    i64 day;
+    i64 hour;
+    i64 minute;
+    i64 second;
+    i64 nanosecond;
+    i64 offset_seconds;
 }
 
 public fn valid_time(Time& time) -> bool {
-  return time.hour >= 0 && time.hour <= 23 && time.minute >= 0 && time.minute <= 59 && time.second >= 0 && time.second <= 59 && time.nanosecond >= 0 && time.nanosecond <= 999999999;
+    return time.hour >= 0 &&
+        time.hour <= 23 &&
+        time.minute >= 0 &&
+        time.minute <= 59 &&
+        time.second >= 0 &&
+        time.second <= 59 &&
+        time.nanosecond >= 0 &&
+        time.nanosecond <= 999999999;
 }
 
 public fn valid_datetime(DateTime& value) -> bool {
-  Date date = Date { year: value.year, month: value.month, day: value.day };
-  if (!datetime::calendar::valid(&date)) {
-    return false;
-  }
-  Time time = Time { hour: value.hour, minute: value.minute, second: value.second, nanosecond: value.nanosecond };
-  return valid_time(&time);
+    Date date = Date {
+        year: value.year,
+        month: value.month,
+        day: value.day
+    };
+    if (!datetime::calendar::valid(&date)) {
+        return false;
+    }
+    Time time = Time {
+        hour: value.hour,
+        minute: value.minute,
+        second: value.second,
+        nanosecond: value.nanosecond
+    };
+    return valid_time(&time);
 }
 
 public fn valid_offset_datetime(OffsetDateTime& value) -> bool {
-  DateTime datetime = DateTime {
-    year: value.year,
-    month: value.month,
-    day: value.day,
-    hour: value.hour,
-    minute: value.minute,
-    second: value.second,
-    nanosecond: value.nanosecond,
-  };
-  return valid_datetime(&datetime) && value.offset_seconds > -86400 && value.offset_seconds < 86400;
+    DateTime datetime = DateTime {
+        year: value.year,
+        month: value.month,
+        day: value.day,
+        hour: value.hour,
+        minute: value.minute,
+        second: value.second,
+        nanosecond: value.nanosecond,
+    };
+    return valid_datetime(&datetime) && value.offset_seconds > -86400 && value.offset_seconds < 86400;
 }
 
 public fn utc() -> UtcOffset {
-  return UtcOffset { seconds: 0 };
+    return UtcOffset {
+        seconds: 0
+    };
 }
 
 public fn offset_seconds(i64 seconds, UtcOffset&mut output) -> bool {
-  if (seconds <= -86400 || seconds >= 86400) {
-    return false;
-  }
-  *output = UtcOffset { seconds: seconds };
-  return true;
+    if (seconds <= -86400 || seconds >= 86400) {
+        return false;
+    }
+    *output = UtcOffset {
+        seconds: seconds
+    };
+    return true;
 }
 
 public fn offset_hm(i64 hours, i64 minutes, UtcOffset&mut output) -> bool {
-  if (hours < -23 || hours > 23 || minutes < 0 || minutes > 59) {
-    return false;
-  }
-  i64 sign = 1;
-  if (hours < 0) {
-    sign = -1;
-  }
-  i64 seconds = hours * 3600 + sign * minutes * 60;
-  return offset_seconds(seconds, output);
+    if (hours < -23 || hours > 23 || minutes < 0 || minutes > 59) {
+        return false;
+    }
+
+    i64 sign = 1;
+
+    if (hours < 0) {
+        sign = -1;
+    }
+
+    i64 seconds = hours * 3600 + sign * minutes * 60;
+
+    return offset_seconds(seconds, output);
 }

@@ -1,0 +1,14 @@
+{
+  "archive": "packages/protobuf/0.1.0.dpk",
+  "checksum": "34b94273e8d7c2cc",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/protobuf/0.1.0.dpk",
+  "metadata": {
+    "description": "An allocation-free Protocol Buffers wire codec for Raz."
+  },
+  "name": "protobuf",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.1.0",
+  "yanked": false
+}

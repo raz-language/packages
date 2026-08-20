@@ -1,0 +1,14 @@
+{
+  "archive": "packages/encoding/0.1.0.dpk",
+  "checksum": "bccac00ee6338ef5",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/encoding/0.1.0.dpk",
+  "metadata": {
+    "description": "Allocation-free binary-to-text codecs and checksums for Raz."
+  },
+  "name": "encoding",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.1.0",
+  "yanked": false
+}

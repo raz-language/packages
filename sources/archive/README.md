@@ -1,25 +1,21 @@
 # archive
 
-Archive readers and writers for Raz.
+Safe, allocation-free archive format primitives for Raz.
 
-> **Status:** initial package scaffold. The public API is not stable yet.
+Version 0.1.0 provides zero-copy USTAR and stored-ZIP readers, caller-owned TAR/ZIP writers, IEEE CRC-32 verification, explicit truncation/feature errors, and extraction-path validation.
 
-## Goals
+## Modules
 
-- [ ] stream abstraction
-- [ ] TAR reader/writer
-- [ ] ZIP format layer
-- [ ] CRC integration
-- [ ] safe path extraction
+- `archive::path` rejects absolute paths, backslashes, drive/ADS colons, NUL/control bytes, empty components, and `.`/`..` traversal.
+- `archive::tar` validates header checksums and octal fields, bounds every padded record, reads files/directories/links, and writes USTAR records.
+- `archive::zip` reads and writes unencrypted stored entries plus central-directory records. Unsupported compression and data descriptors fail explicitly.
 
 ## Dependencies
 
-None.
+None beyond the Raz standard library.
 
 ## Design rules
 
-- Native Raz implementation wherever practical.
-- Explicit errors through `Result` for recoverable failures.
-- Avoid hidden allocations on hot paths.
-- Keep the public surface small and composable.
-- Add malformed/adversarial-input tests for parser, protocol, and security code.
+- Entry views borrow archive memory; callers control copying and extraction.
+- Writers preflight capacity and use caller-owned output buffers.
+- ZIP compression is deliberately outside this format layer; method 0 is fully supported and other methods return `UnsupportedFeature`.

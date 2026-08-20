@@ -1,0 +1,20 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import yaml::error;
+import yaml::reader;
+import yaml::value;
+
+fn main() -> i64 {
+    u8 source[10] = [101, 110, 97, 98, 108, 101, 100, 58, 32, 49];
+    YamlReader reader = yaml::reader::create(&source[0]as usize, 10, 16);
+    YamlLine line;
+
+    if (yaml::reader::next(&mut reader, &mut line) != YamlError::None) {
+        return 1;
+    }
+    if (line.kind != YamlLineKind::Mapping) {
+        return 2;
+    }
+    return 0;
+}

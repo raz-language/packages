@@ -1,0 +1,38 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import cbor::error;
+import cbor::reader;
+import cbor::value;
+import cbor::writer;
+
+fn main() -> i64 {
+    u8 truncated[1] = [24];
+    CborReader reader = cbor::reader::create(&truncated[0]as usize, 1);
+    CborItem item;
+
+    if (cbor::reader::next(&mut reader, &mut item) != CborError::UnexpectedEnd) {
+        return 1;
+    }
+    if (cbor::reader::position(&reader) != 0) {
+        return 2;
+    }
+
+    u8 indefinite[1] = [159];
+
+    reader = cbor::reader::create(&indefinite[0]as usize, 1);
+    if (cbor::reader::next(&mut reader, &mut item) != CborError::IndefiniteUnsupported) {
+        return 3;
+    }
+
+    u8 output[1];
+    CborWriter writer = cbor::writer::create(&mut output[0]as usize, 1);
+
+    if (cbor::writer::unsigned(&mut writer, 1000) != CborError::OutputFull) {
+        return 4;
+    }
+    if (cbor::writer::written(&writer) != 0) {
+        return 5;
+    }
+    return 0;
+}

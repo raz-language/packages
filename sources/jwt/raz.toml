@@ -8,8 +8,12 @@ kind = "static-library"
 entry = "src/lib.rz"
 
 [dependencies]
+alloc = "../../../raz/library/packages/alloc"
+core = "../../../raz/library/packages/core"
 crypto = "../crypto"
-serde = "../serde"
+encoding = "../encoding"
+json = "../json"
+std = "../../../raz/library/packages/std"
 
 [profile.debug]
 optimization = 0

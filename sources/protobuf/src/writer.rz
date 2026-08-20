@@ -1,0 +1,186 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace protobuf::writer;
+
+import protobuf::error;
+
+public struct ProtobufWriter {
+    usize output;
+    i64 capacity;
+    i64 length;
+    ProtobufError error;
+}
+
+fn store(usize address, u64 value) {
+    unsafe {
+        *((address)as u8*mut) = value as u8;
+    }
+}
+
+fn load(usize address) -> u64 {
+    unsafe {
+        return (*((address)as u8*const))as u64;
+    }
+}
+
+public fn create(usize output, i64 capacity) -> ProtobufWriter {
+    ProtobufError error = ProtobufError::None;
+
+    if (capacity < 0 || (capacity > 0 && output == 0)) {
+        capacity = 0;
+        error = ProtobufError::InvalidInput;
+    }
+    return ProtobufWriter {
+        output: output,
+        capacity: capacity,
+        length: 0,
+        error: error,
+    };
+}
+
+public fn written(ProtobufWriter& writer) -> i64 {
+    return writer.length;
+}
+
+public fn error(ProtobufWriter& writer) -> ProtobufError {
+    return writer.error;
+}
+
+fn fail(ProtobufWriter&mut writer, ProtobufError error) -> ProtobufError {
+    if (writer.error == ProtobufError::None) {
+        writer.error = error;
+    }
+    return writer.error;
+}
+
+public fn varint_length(u64 value) -> i64 {
+    i64 length = 1;
+
+    while (value >= 128) {
+        value >>= 7;
+        length += 1;
+    }
+    return length;
+}
+
+fn write_varint(ProtobufWriter&mut writer, u64 value) -> bool {
+    i64 required = varint_length(value);
+
+    if (required > writer.capacity - writer.length) {
+        fail(writer, ProtobufError::OutputFull);
+        return false;
+    }
+    while (value >= 128) {
+        store(writer.output + writer.length, (value & 127) | 128);
+        writer.length += 1;
+        value >>= 7;
+    }
+    store(writer.output + writer.length, value);
+    writer.length += 1;
+    return true;
+}
+
+fn key(ProtobufWriter&mut writer, i64 field_number, i64 wire_type) -> bool {
+    if (field_number <= 0 || field_number > 536870911) {
+        fail(writer, ProtobufError::InvalidFieldNumber);
+        return false;
+    }
+    return write_varint(writer, ((field_number as u64) << 3) | (wire_type as u64));
+}
+
+public fn uint64(ProtobufWriter&mut writer, i64 field_number, u64 value) -> ProtobufError {
+    if (field_number <= 0 || field_number > 536870911) {
+        return fail(writer, ProtobufError::InvalidFieldNumber);
+    }
+
+    i64 required = varint_length(((field_number as u64) << 3)) + varint_length(value);
+
+    if (required > writer.capacity - writer.length) {
+        return fail(writer, ProtobufError::OutputFull);
+    }
+    key(writer, field_number, 0);
+    write_varint(writer, value);
+    return ProtobufError::None;
+}
+
+public fn int64(ProtobufWriter&mut writer, i64 field_number, i64 value) -> ProtobufError {
+    return uint64(writer, field_number, value as u64);
+}
+
+public fn sint64(ProtobufWriter&mut writer, i64 field_number, i64 value) -> ProtobufError {
+    u64 encoded = (value as u64) << 1;
+
+    if (value < 0) {
+        encoded = ((-(value + 1))as u64) << 1 | 1;
+    }
+    return uint64(writer, field_number, encoded);
+}
+
+public fn boolean(ProtobufWriter&mut writer, i64 field_number, bool value) -> ProtobufError {
+    if (value) {
+        return uint64(writer, field_number, 1);
+    }
+    return uint64(writer, field_number, 0);
+}
+
+fn fixed(ProtobufWriter&mut writer, i64 field_number, i64 wire_type, u64 value, i64 width) -> ProtobufError {
+    if (field_number <= 0 || field_number > 536870911) {
+        return fail(writer, ProtobufError::InvalidFieldNumber);
+    }
+
+    i64 required = varint_length(((field_number as u64) << 3) | wire_type as u64) + width;
+
+    if (required > writer.capacity - writer.length) {
+        return fail(writer, ProtobufError::OutputFull);
+    }
+    key(writer, field_number, wire_type);
+
+    i64 i = 0;
+
+    while (i < width) {
+        store(writer.output + writer.length + i, value >> (i * 8));
+        i += 1;
+    }
+    writer.length += width;
+    return ProtobufError::None;
+}
+
+public fn fixed32(ProtobufWriter&mut writer, i64 field_number, u32 value) -> ProtobufError {
+    return fixed(writer, field_number, 5, value as u64, 4);
+}
+
+public fn fixed64(ProtobufWriter&mut writer, i64 field_number, u64 value) -> ProtobufError {
+    return fixed(writer, field_number, 1, value, 8);
+}
+
+public fn bytes(ProtobufWriter&mut writer, i64 field_number, usize data, i64 length) -> ProtobufError {
+    if (length < 0 || (length > 0 && data == 0)) {
+        return fail(writer, ProtobufError::InvalidInput);
+    }
+    if (field_number <= 0 || field_number > 536870911) {
+        return fail(writer, ProtobufError::InvalidFieldNumber);
+    }
+
+    u64 raw_key = ((field_number as u64) << 3) | 2;
+    i64 header = varint_length(raw_key) + varint_length(length as u64);
+
+    if (header > writer.capacity - writer.length || length > writer.capacity - writer.length - header) {
+        return fail(writer, ProtobufError::OutputFull);
+    }
+    write_varint(writer, raw_key);
+    write_varint(writer, length as u64);
+
+    i64 i = 0;
+
+    while (i < length) {
+        store(writer.output + writer.length + i, load(data + i));
+        i += 1;
+    }
+    writer.length += length;
+    return ProtobufError::None;
+}
+
+public fn string(ProtobufWriter&mut writer, i64 field_number, usize data, i64 length) -> ProtobufError {
+    return bytes(writer, field_number, data, length);
+}

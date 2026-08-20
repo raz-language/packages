@@ -1,0 +1,108 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import archive::path;
+import archive::tar;
+import archive::zip;
+
+fn main() -> i64 {
+    u8 safe_name[8] = [100, 105, 114, 47, 97, 46, 114, 122];
+    u8 unsafe_name[8] = [46, 46, 47, 97, 46, 114, 122, 0];
+
+    if (!archive::path::safe(&safe_name[0]as usize, 8) || archive::path::safe(&unsafe_name[0]as usize, 7)) {
+        return 1;
+    }
+
+    u8 payload[3] = [114, 97, 122];
+    u8 tar_bytes[2048];
+    i64 written = 0;
+
+    if (
+        archive::tar::write_entry(
+            &mut tar_bytes[0]as usize,
+            2048,
+            &safe_name[0]as usize,
+            8,
+            &payload[0]as usize,
+            3,
+            420,
+            0,
+            TarEntryKind::File,
+            &mut written
+        ) != TarError::None
+    ) {
+        return 2;
+    }
+    if (archive::tar::write_end((&mut tar_bytes[0]as usize) + written, 2048 - written) != TarError::None) {
+        return 3;
+    }
+
+    TarReader tar = archive::tar::reader(&tar_bytes[0]as usize, written + 1024);
+    TarEntry entry;
+
+    if (
+        archive::tar::next(&mut tar, &mut entry) != TarError::None ||
+        entry.size != 3 ||
+        entry.kind != TarEntryKind::File
+    ) {
+        return 4;
+    }
+    if (archive::tar::next(&mut tar, &mut entry) != TarError::End) {
+        return 5;
+    }
+
+    u8 zip_bytes[256];
+    ZipRecord record;
+    i64 local = 0;
+
+    if (
+        archive::zip::write_local_stored(
+            &mut zip_bytes[0]as usize,
+            256,
+            &safe_name[0]as usize,
+            8,
+            &payload[0]as usize,
+            3,
+            0,
+            &mut record,
+            &mut local
+        ) != ZipError::None
+    ) {
+        return 6;
+    }
+
+    i64 central = 0;
+
+    if (
+        archive::zip::write_central_stored(
+            (&mut zip_bytes[0]as usize) + local,
+            256 - local,
+            &record,
+            &mut central
+        ) != ZipError::None
+    ) {
+        return 7;
+    }
+    if (
+        archive::zip::write_end(
+            (&mut zip_bytes[0]as usize) + local + central,
+            256 - local - central,
+            1,
+            central,
+            local
+        ) != ZipError::None
+    ) {
+        return 8;
+    }
+
+    ZipReader zip = archive::zip::reader(&zip_bytes[0]as usize, local + central + 22);
+    ZipEntry zipped;
+
+    if (archive::zip::next(&mut zip, &mut zipped) != ZipError::None || zipped.data.length != 3) {
+        return 9;
+    }
+    if (archive::zip::next(&mut zip, &mut zipped) != ZipError::End) {
+        return 10;
+    }
+    return 0;
+}

@@ -1,0 +1,55 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import testing::assertions;
+import testing::random;
+import testing::property;
+import testing::benchmark;
+
+fn main() -> i64 {
+    Failure failures[4];
+    TestContext context = testing::assertions::create(&mut failures[0]as usize, 4);
+
+    testing::assertions::set_case(&mut context, 3);
+    if (!testing::assertions::expect(&mut context, true)) {
+        return 1;
+    }
+    if (!testing::assertions::equal_i64(&mut context, 7, 7)) {
+        return 2;
+    }
+    if (testing::assertions::equal_i64(&mut context, 7, 8)) {
+        return 3;
+    }
+    if (
+        testing::assertions::failure_count(&context) != 1 ||
+        testing::assertions::assertion_count(&context) != 3
+    ) {
+        return 4;
+    }
+
+    TestRng first = testing::random::create(42);
+    TestRng second = testing::random::create(42);
+
+    if (testing::random::next_u64(&mut first) != testing::random::next_u64(&mut second)) {
+        return 5;
+    }
+
+    PropertyRunner property = testing::property::create(7, 16);
+    i64 cases = 0;
+
+    while (testing::property::next(&mut property)) {
+        cases += 1;
+    }
+    if (cases != 16 || !testing::property::passed(&property)) {
+        return 6;
+    }
+
+    BenchmarkStats stats = testing::benchmark::create();
+
+    testing::benchmark::add(&mut stats, 10);
+    testing::benchmark::add(&mut stats, 20);
+    if (stats.samples != 2 || stats.minimum_ns != 10 || stats.maximum_ns != 20 || stats.mean_ns != 15.0) {
+        return 7;
+    }
+    return 0;
+}

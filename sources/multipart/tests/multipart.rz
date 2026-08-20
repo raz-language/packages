@@ -1,0 +1,47 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import multipart::reader;
+import multipart::writer;
+
+fn main() -> i64 {
+    u8 boundary[8] = [114, 97, 122, 45, 116, 101, 115, 116];
+    u8 name[5] = [116, 105, 116, 108, 101];
+    u8 value[3] = [114, 97, 122];
+    u8 output[512];
+    MultipartWriter writer = multipart::writer::create(&mut output[0]as usize, 512, &boundary[0]as usize, 8);
+
+    if (
+        multipart::writer::field(
+            &mut writer,
+            &name[0]as usize,
+            5,
+            &value[0]as usize,
+            3
+        ) != MultipartWriteError::None
+    ) {
+        return 1;
+    }
+    if (multipart::writer::finish(&mut writer) != MultipartWriteError::None) {
+        return 2;
+    }
+    MultipartReader reader = multipart::reader::create(
+        &output[0]as usize,
+        multipart::writer::written(&writer),
+        &boundary[0]as usize,
+        8
+    );
+
+    Part part;
+
+    if (multipart::reader::next(&mut reader, &mut part) != MultipartError::None) {
+        return 3;
+    }
+    if (part.name.length != 5 || part.body.length != 3 || part.filename.length != 0) {
+        return 4;
+    }
+    if (multipart::reader::next(&mut reader, &mut part) != MultipartError::End) {
+        return 5;
+    }
+    return 0;
+}

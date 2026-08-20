@@ -1,0 +1,24 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace jwt::error;
+
+public enum JwtError {
+    None,
+    InvalidInput,
+    InvalidFormat,
+    InvalidHeader,
+    InvalidPayload,
+    UnsupportedAlgorithm,
+    DisallowedAlgorithm,
+    WeakKey,
+    TokenTooLarge,
+    SignatureMismatch,
+    CryptoFailure,
+    OutputFull,
+    Expired,
+    NotYetValid,
+    IssuedInFuture,
+    InvalidClaims,
+    InvalidJwk,
+}

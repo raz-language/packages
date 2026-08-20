@@ -1,0 +1,18 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace protobuf::error;
+
+public enum ProtobufError {
+    None,
+    End,
+    InvalidInput,
+    UnexpectedEnd,
+    InvalidVarint,
+    InvalidFieldNumber,
+    InvalidWireType,
+    GroupsUnsupported,
+    LengthOverflow,
+    TypeMismatch,
+    OutputFull,
+}

@@ -5,8 +5,13 @@ import sqlite;
 
 fn main() -> i64 {
     auto result = sqlite::connection::open_memory();
-    if (result.is_error()) { return 1; }
+
+    if (result.is_error()) {
+        return 1;
+    }
+
     sqlite::connection::Connection db = result.unwrap();
+
     sqlite::connection::set_busy_timeout(&db, 5000);
     sqlite::connection::close(&mut db);
     return 0;

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace websocket::frame;
+
 import core::result;
 
 public enum Opcode {
@@ -35,27 +36,60 @@ public struct FrameView {
     i64 frame_length;
 }
 
-fn load(usize p) -> i64 { unsafe { return (*((p)as u8*const))as i64; } }
-fn store(usize p, i64 v) { unsafe { *((p)as u8*mut) = v as u8; } }
+fn load(usize p) -> i64 {
+    unsafe {
+        return (*((p)as u8*const))as i64;
+    }
+}
+
+fn store(usize p, i64 v) {
+    unsafe {
+        *((p)as u8*mut) = v as u8;
+    }
+}
 
 fn opcode_from(i64 raw) -> Result<Opcode, FrameError> {
-    if (raw == 0) { return Result<Opcode, FrameError>::Ok(Opcode::Continuation); }
-    if (raw == 1) { return Result<Opcode, FrameError>::Ok(Opcode::Text); }
-    if (raw == 2) { return Result<Opcode, FrameError>::Ok(Opcode::Binary); }
-    if (raw == 8) { return Result<Opcode, FrameError>::Ok(Opcode::Close); }
-    if (raw == 9) { return Result<Opcode, FrameError>::Ok(Opcode::Ping); }
-    if (raw == 10) { return Result<Opcode, FrameError>::Ok(Opcode::Pong); }
+    if (raw == 0) {
+        return Result<Opcode, FrameError>::Ok(Opcode::Continuation);
+    }
+    if (raw == 1) {
+        return Result<Opcode, FrameError>::Ok(Opcode::Text);
+    }
+    if (raw == 2) {
+        return Result<Opcode, FrameError>::Ok(Opcode::Binary);
+    }
+    if (raw == 8) {
+        return Result<Opcode, FrameError>::Ok(Opcode::Close);
+    }
+    if (raw == 9) {
+        return Result<Opcode, FrameError>::Ok(Opcode::Ping);
+    }
+    if (raw == 10) {
+        return Result<Opcode, FrameError>::Ok(Opcode::Pong);
+    }
     return Result<Opcode, FrameError>::Error(FrameError::InvalidOpcode);
 }
 
 fn opcode_raw(Opcode opcode) -> i64 {
     match opcode {
-        Opcode::Continuation => { return 0; }
-        Opcode::Text => { return 1; }
-        Opcode::Binary => { return 2; }
-        Opcode::Close => { return 8; }
-        Opcode::Ping => { return 9; }
-        Opcode::Pong => { return 10; }
+        Opcode::Continuation => {
+            return 0;
+        }
+        Opcode::Text => {
+            return 1;
+        }
+        Opcode::Binary => {
+            return 2;
+        }
+        Opcode::Close => {
+            return 8;
+        }
+        Opcode::Ping => {
+            return 9;
+        }
+        Opcode::Pong => {
+            return 10;
+        }
     }
 }
 
@@ -65,97 +99,198 @@ fn control(Opcode opcode) -> bool {
 
 /// Parses one complete RFC 6455 frame without copying its payload.
 /// `expect_masked` is true for server-side input and false for client-side input.
-public fn parse(usize input, i64 length, bool expect_masked, i64 max_payload) -> Result<FrameView, FrameError> {
-    if (length < 2 || input == 0) { return Result<FrameView, FrameError>::Error(FrameError::Incomplete); }
+public fn parse(
+    usize input,
+    i64 length,
+    bool expect_masked,
+    i64 max_payload
+) -> Result<FrameView, FrameError> {
+    if (length < 2 || input == 0) {
+        return Result<FrameView, FrameError>::Error(FrameError::Incomplete);
+    }
+
     i64 b0 = load(input);
     i64 b1 = load(input + 1);
-    if ((b0 & 112) != 0) { return Result<FrameView, FrameError>::Error(FrameError::ReservedBits); }
+
+    if ((b0 & 112) != 0) {
+        return Result<FrameView, FrameError>::Error(FrameError::ReservedBits);
+    }
+
     bool fin = (b0 & 128) != 0;
     Opcode opcode = opcode_from(b0 & 15)?;
     bool masked = (b1 & 128) != 0;
-    if (expect_masked && !masked) { return Result<FrameView, FrameError>::Error(FrameError::MaskRequired); }
-    if (!expect_masked && masked) { return Result<FrameView, FrameError>::Error(FrameError::MaskForbidden); }
+
+    if (expect_masked && !masked) {
+        return Result<FrameView, FrameError>::Error(FrameError::MaskRequired);
+    }
+    if (!expect_masked && masked) {
+        return Result<FrameView, FrameError>::Error(FrameError::MaskForbidden);
+    }
+
     i64 cursor = 2;
     i64 payload_length = b1 & 127;
+
     if (payload_length == 126) {
-        if (length < 4) { return Result<FrameView, FrameError>::Error(FrameError::Incomplete); }
+        if (length < 4) {
+            return Result<FrameView, FrameError>::Error(FrameError::Incomplete);
+        }
         payload_length = (load(input + 2) << 8) | load(input + 3);
         cursor = 4;
     } else if (payload_length == 127) {
-        if (length < 10) { return Result<FrameView, FrameError>::Error(FrameError::Incomplete); }
-        if ((load(input + 2) & 128) != 0) { return Result<FrameView, FrameError>::Error(FrameError::InvalidLength); }
+        if (length < 10) {
+            return Result<FrameView, FrameError>::Error(FrameError::Incomplete);
+        }
+        if ((load(input + 2) & 128) != 0) {
+            return Result<FrameView, FrameError>::Error(FrameError::InvalidLength);
+        }
+
         i64 value = 0;
         i64 i = 2;
+
         while (i < 10) {
-            if (value > (i64::MAX >> 8)) { return Result<FrameView, FrameError>::Error(FrameError::InvalidLength); }
+            if (value > (i64::MAX >> 8)) {
+                return Result<FrameView, FrameError>::Error(FrameError::InvalidLength);
+            }
             value = (value << 8) | load(input + i);
             i += 1;
         }
         payload_length = value;
         cursor = 10;
     }
-    if (max_payload >= 0 && payload_length > max_payload) { return Result<FrameView, FrameError>::Error(FrameError::InvalidLength); }
+    if (max_payload >= 0 && payload_length > max_payload) {
+        return Result<FrameView, FrameError>::Error(FrameError::InvalidLength);
+    }
     if (control(opcode) && (!fin || payload_length > 125)) {
-        if (!fin) { return Result<FrameView, FrameError>::Error(FrameError::ControlFragmented); }
+        if (!fin) {
+            return Result<FrameView, FrameError>::Error(FrameError::ControlFragmented);
+        }
         return Result<FrameView, FrameError>::Error(FrameError::ControlTooLarge);
     }
+
     u32 key = 0;
+
     if (masked) {
-        if (length < cursor + 4) { return Result<FrameView, FrameError>::Error(FrameError::Incomplete); }
-        key = ((load(input + cursor) as u32) << 24) | ((load(input + cursor + 1) as u32) << 16) | ((load(input + cursor + 2) as u32) << 8) | (load(input + cursor + 3) as u32);
+        if (length < cursor + 4) {
+            return Result<FrameView, FrameError>::Error(FrameError::Incomplete);
+        }
+        key =
+            ((load(input + cursor)as u32) << 24) |
+            ((load(input + cursor + 1)as u32) << 16) |
+            ((load(input + cursor + 2)as u32) << 8) |
+            (load(input + cursor + 3)as u32);
         cursor += 4;
     }
-    if (payload_length > length - cursor) { return Result<FrameView, FrameError>::Error(FrameError::Incomplete); }
-    return Result<FrameView, FrameError>::Ok(FrameView { fin: fin, opcode: opcode, masked: masked, mask_key: key, payload: input + cursor, payload_length: payload_length, frame_length: cursor + payload_length });
+    if (payload_length > length - cursor) {
+        return Result<FrameView, FrameError>::Error(FrameError::Incomplete);
+    }
+    return Result<FrameView, FrameError>::Ok(FrameView {
+        fin: fin,
+        opcode: opcode,
+        masked: masked,
+        mask_key: key,
+        payload: input + cursor,
+        payload_length: payload_length,
+        frame_length: cursor + payload_length
+    }
+    );
 }
 
 /// Applies/removes an RFC 6455 mask in place.
 public fn apply_mask(usize data, i64 length, u32 key, i64 offset) {
     i64 i = 0;
+
     while (i < length) {
         i64 shift = 24 - (((offset + i) & 3) * 8);
-        i64 k = ((key >> (shift as u32)) & 255) as i64;
+        i64 k = ((key >> (shift as u32)) & 255)as i64;
+
         store(data + i, load(data + i) ^ k);
         i += 1;
     }
 }
 
 public fn header_length(i64 payload_length, bool masked) -> i64 {
-    if (payload_length < 0) { return -1; }
+    if (payload_length < 0) {
+        return -1;
+    }
+
     i64 n = 2;
-    if (payload_length >= 126 && payload_length <= 65535) { n += 2; }
-    else if (payload_length > 65535) { n += 8; }
-    if (masked) { n += 4; }
+
+    if (payload_length >= 126 && payload_length <= 65535) {
+        n += 2;
+    } else if (payload_length > 65535) {
+        n += 8;
+    }
+    if (masked) {
+        n += 4;
+    }
     return n;
 }
 
 /// Writes a frame header. Payload bytes are written separately, enabling vectored/nonblocking I/O.
-public fn write_header(usize output, i64 capacity, bool fin, Opcode opcode, bool masked, u32 key, i64 payload_length) -> Result<i64, FrameError> {
+public fn write_header(
+    usize output,
+    i64 capacity,
+    bool fin,
+    Opcode opcode,
+    bool masked,
+    u32 key,
+    i64 payload_length
+) -> Result<i64, FrameError> {
     i64 needed = header_length(payload_length, masked);
-    if (needed < 0) { return Result<i64, FrameError>::Error(FrameError::InvalidLength); }
-    if (capacity < needed || output == 0) { return Result<i64, FrameError>::Error(FrameError::OutputFull); }
+
+    if (needed < 0) {
+        return Result<i64, FrameError>::Error(FrameError::InvalidLength);
+    }
+    if (capacity < needed || output == 0) {
+        return Result<i64, FrameError>::Error(FrameError::OutputFull);
+    }
     if (control(opcode) && (!fin || payload_length > 125)) {
-        if (!fin) { return Result<i64, FrameError>::Error(FrameError::ControlFragmented); }
+        if (!fin) {
+            return Result<i64, FrameError>::Error(FrameError::ControlFragmented);
+        }
         return Result<i64, FrameError>::Error(FrameError::ControlTooLarge);
     }
+
     i64 first = opcode_raw(opcode);
-    if (fin) { first |= 128; }
+
+    if (fin) {
+        first |= 128;
+    }
     store(output, first);
+
     i64 marker = payload_length;
-    if (payload_length >= 126 && payload_length <= 65535) { marker = 126; }
-    else if (payload_length > 65535) { marker = 127; }
-    if (masked) { marker |= 128; }
-    store(output + 1, marker);
-    i64 cursor = 2;
-    if ((marker & 127) == 126) {
-        store(output + cursor, (payload_length >> 8) & 255); store(output + cursor + 1, payload_length & 255); cursor += 2;
-    } else if ((marker & 127) == 127) {
-        i64 shift = 56;
-        while (shift >= 0) { store(output + cursor, (payload_length >> shift) & 255); cursor += 1; shift -= 8; }
+
+    if (payload_length >= 126 && payload_length <= 65535) {
+        marker = 126;
+    } else if (payload_length > 65535) {
+        marker = 127;
     }
     if (masked) {
-        store(output + cursor, ((key >> 24) & 255) as i64); store(output + cursor + 1, ((key >> 16) & 255) as i64);
-        store(output + cursor + 2, ((key >> 8) & 255) as i64); store(output + cursor + 3, (key & 255) as i64); cursor += 4;
+        marker |= 128;
+    }
+    store(output + 1, marker);
+
+    i64 cursor = 2;
+
+    if ((marker & 127) == 126) {
+        store(output + cursor, (payload_length >> 8) & 255);
+        store(output + cursor + 1, payload_length & 255);
+        cursor += 2;
+    } else if ((marker & 127) == 127) {
+        i64 shift = 56;
+
+        while (shift >= 0) {
+            store(output + cursor, (payload_length >> shift) & 255);
+            cursor += 1;
+            shift -= 8;
+        }
+    }
+    if (masked) {
+        store(output + cursor, ((key >> 24) & 255)as i64);
+        store(output + cursor + 1, ((key >> 16) & 255)as i64);
+        store(output + cursor + 2, ((key >> 8) & 255)as i64);
+        store(output + cursor + 3, (key & 255)as i64);
+        cursor += 4;
     }
     return Result<i64, FrameError>::Ok(cursor);
 }

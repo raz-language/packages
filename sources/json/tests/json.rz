@@ -1,0 +1,76 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import alloc::string;
+import json::core;
+import json::document;
+import json::pointer;
+import json::writer;
+
+fn main() -> i64 {
+    JsonWriter writer = json::writer::create(128);
+    u8 key_items[5] = [105, 116, 101, 109, 115];
+    u8 key_name[4] = [110, 97, 109, 101];
+    u8 value[3] = [114, 97, 122];
+
+    if (!json::writer::begin_object(&mut writer)) {
+        return 1;
+    }
+    if (!json::writer::key(&mut writer, &key_items[0]as usize, 5)) {
+        return 2;
+    }
+    if (!json::writer::begin_array(&mut writer)) {
+        return 3;
+    }
+    if (!json::writer::begin_object(&mut writer)) {
+        return 4;
+    }
+    if (!json::writer::key(&mut writer, &key_name[0]as usize, 4)) {
+        return 5;
+    }
+    if (!json::writer::string(&mut writer, &value[0]as usize, 3)) {
+        return 6;
+    }
+    if (
+        !json::writer::end(&mut writer) ||
+        !json::writer::end(&mut writer) ||
+        !json::writer::end(&mut writer)
+    ) {
+        return 7;
+    }
+    if (!json::writer::complete(&writer)) {
+        return 8;
+    }
+
+    BytesView source = json::writer::view(&writer);
+
+    if (json::core::validate(source.data, source.length, 64) != JsonError::None) {
+        return 9;
+    }
+
+    JsonDocument document = json::document::empty();
+
+    if (json::document::parse_borrowed(source.data, source.length, 64, &mut document) != JsonError::None) {
+        return 10;
+    }
+
+    u8 pointer_bytes[13] = [47, 105, 116, 101, 109, 115, 47, 48, 47, 110, 97, 109, 101];
+    String segment = alloc::string::with_capacity(16);
+    String scratch = alloc::string::with_capacity(16);
+    i64 node = -1;
+
+    if (
+        json::pointer::resolve(
+            &document,
+            &pointer_bytes[0]as usize,
+            13,
+            &mut segment,
+            &mut scratch,
+            &mut node
+        ) != PointerError::None ||
+        node < 0
+    ) {
+        return 11;
+    }
+    return 0;
+}

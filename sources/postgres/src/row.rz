@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace postgres::row;
+
+import core::bytes;
 import core::result;
 import postgres::wire;
 
@@ -18,18 +20,18 @@ fn load(usize p) -> i64 {
     }
 }
 
-public fn as_bytes(wire::FieldView& field) -> BytesView {
+public fn as_bytes(FieldView& field) -> BytesView {
     return BytesView {
         data: field.data,
         length: field.length
     };
 }
 
-public fn is_null(wire::FieldView& field) -> bool {
+public fn is_null(FieldView& field) -> bool {
     return field.is_null;
 }
 
-public fn as_bool(wire::FieldView& field) -> Result<bool, ValueError> {
+public fn as_bool(FieldView& field) -> Result<bool, ValueError> {
     if (field.is_null) {
         return Result<bool, ValueError>::Error(ValueError::Null);
     }
@@ -46,7 +48,7 @@ public fn as_bool(wire::FieldView& field) -> Result<bool, ValueError> {
     return Result<bool, ValueError>::Error(ValueError::InvalidBoolean);
 }
 
-public fn as_i64(wire::FieldView& field) -> Result<i64, ValueError> {
+public fn as_i64(FieldView& field) -> Result<i64, ValueError> {
     if (field.is_null) {
         return Result<i64, ValueError>::Error(ValueError::Null);
     }

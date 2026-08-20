@@ -1,0 +1,91 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import jwt::error;
+import jwt::claims;
+import jwt::jws;
+
+fn main() -> i64 {
+    u8 header[27] = [123, 34, 97, 108, 103, 34, 58, 34, 72, 83, 50, 53, 54, 34, 44, 34, 116, 121, 112, 34, 58, 34, 74, 87, 84, 34, 125];
+    u8 payload[29] = [123, 34, 115, 117, 98, 34, 58, 34, 52, 50, 34, 44, 34, 101, 120, 112, 34, 58, 50, 48, 48, 48, 48, 48, 48, 48, 48, 48, 125];
+    u8 key[32];
+    i64 key_index = 0;
+
+    while (key_index < 32) {
+        key[key_index] = 1;
+        key_index += 1;
+    }
+
+    u8 token[256];
+    i64 written = 0;
+
+    if (
+        jwt::jws::sign_hs256(
+            &header[0]as usize,
+            27,
+            &payload[0]as usize,
+            29,
+            &key[0]as usize,
+            32,
+            &mut token[0]as usize,
+            256,
+            &mut written
+        ) != JwtError::None
+    ) {
+        return 1;
+    }
+
+    AlgorithmPolicy policy = jwt::jws::strict_policy();
+    u8 scratch[128];
+    u8 decoded[128];
+    i64 decoded_length = 0;
+
+    if (
+        jwt::jws::verify_hs256(
+            &token[0]as usize,
+            written,
+            &key[0]as usize,
+            32,
+            &policy,
+            &mut scratch[0]as usize,
+            128,
+            &mut decoded[0]as usize,
+            128,
+            &mut decoded_length
+        ) != JwtError::None ||
+        decoded_length != 29
+    ) {
+        return 2;
+    }
+
+    RegisteredClaims claims;
+
+    if (
+        jwt::claims::parse(&decoded[0]as usize, decoded_length, &mut claims) != JwtError::None ||
+        !claims.has_expiration ||
+        claims.expiration != 2000000000
+    ) {
+        return 3;
+    }
+    if (jwt::claims::validate_time(&claims, 1900000000, 0) != JwtError::None) {
+        return 4;
+    }
+    token[written - 1] ^= 1;
+    if (
+        jwt::jws::verify_hs256(
+            &token[0]as usize,
+            written,
+            &key[0]as usize,
+            32,
+            &policy,
+            &mut scratch[0]as usize,
+            128,
+            &mut decoded[0]as usize,
+            128,
+            &mut decoded_length
+        ) != JwtError::SignatureMismatch
+    ) {
+        return 5;
+    }
+    return 0;
+}

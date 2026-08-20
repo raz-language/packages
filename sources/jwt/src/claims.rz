@@ -1,0 +1,212 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace jwt::claims;
+
+import alloc::string;
+import core::bytes;
+import jwt::error;
+import std::encoding::json;
+import std::encoding::json::document;
+
+public struct RegisteredClaims {
+    BytesView issuer;
+    BytesView subject;
+    BytesView audience;
+    bool audience_is_array;
+    bool has_expiration;
+    bool has_not_before;
+    bool has_issued_at;
+    i64 expiration;
+    i64 not_before;
+    i64 issued_at;
+}
+
+public fn empty() -> RegisteredClaims {
+    return RegisteredClaims {
+        issuer: BytesView {
+            data: 0,
+            length: 0
+        },
+        subject: BytesView {
+            data: 0,
+            length: 0
+        },
+        audience: BytesView {
+            data: 0,
+            length: 0
+        },
+        audience_is_array: false,
+        has_expiration: false,
+        has_not_before: false,
+        has_issued_at: false,
+        expiration: 0,
+        not_before: 0,
+        issued_at: 0,
+    };
+}
+
+fn member(JsonDocument& document, i64 root, usize key, i64 length, String&mut scratch) -> i64 {
+    return std::encoding::json::document::object_get(document, root, key, length, scratch);
+}
+
+fn optional_number(JsonDocument& document, i64 index, bool&mut present, i64&mut output) -> bool {
+    if (index < 0) {
+        *present = false;
+        *output = 0;
+        return true;
+    }
+    *present = true;
+    return std::encoding::json::document::number_i64(document, index, output);
+}
+
+fn optional_string(JsonDocument& document, i64 index, BytesView&mut output) -> bool {
+    if (index < 0) {
+        *output = BytesView {
+            data: 0,
+            length: 0
+        };
+        return true;
+    }
+
+    JsonValueKind kind;
+
+    if (
+        !std::encoding::json::document::kind_at(document, index, &mut kind) ||
+        kind != JsonValueKind::String
+    ) {
+        return false;
+    }
+    *output = std::encoding::json::document::value_view(document, index);
+    return true;
+}
+
+/// Parses registered claims from borrowed payload bytes. String views borrow
+/// the payload and contain raw JSON string bytes (escapes are not allocated).
+public fn parse(usize payload, i64 length, RegisteredClaims&mut output) -> JwtError {
+    JsonDocument document = std::encoding::json::document::empty();
+    JsonError parsed = std::encoding::json::document::parse_borrowed(payload, length, 64, &mut document);
+
+    if (parsed != JsonError::None) {
+        return JwtError::InvalidPayload;
+    }
+
+    i64 root = std::encoding::json::document::root_index(&document);
+    JsonValueKind root_kind;
+
+    if (
+        !std::encoding::json::document::kind_at(&document, root, &mut root_kind) ||
+        root_kind != JsonValueKind::Object
+    ) {
+        return JwtError::InvalidClaims;
+    }
+
+    u8 iss_key[3] = [105, 115, 115];
+    u8 sub_key[3] = [115, 117, 98];
+    u8 aud_key[3] = [97, 117, 100];
+    u8 exp_key[3] = [101, 120, 112];
+    u8 nbf_key[3] = [110, 98, 102];
+    u8 iat_key[3] = [105, 97, 116];
+    String scratch = alloc::string::with_capacity(32);
+    RegisteredClaims claims = empty();
+
+    if (
+        !optional_string(
+            &document,
+            member(&document, root, (&iss_key[0])as usize, 3, &mut scratch),
+            &mut claims.issuer
+        )
+    ) {
+        return JwtError::InvalidClaims;
+    }
+    if (
+        !optional_string(
+            &document,
+            member(&document, root, (&sub_key[0])as usize, 3, &mut scratch),
+            &mut claims.subject
+        )
+    ) {
+        return JwtError::InvalidClaims;
+    }
+
+    i64 audience = member(&document, root, (&aud_key[0])as usize, 3, &mut scratch);
+
+    if (audience >= 0) {
+        JsonValueKind audience_kind;
+
+        if (!std::encoding::json::document::kind_at(&document, audience, &mut audience_kind)) {
+            return JwtError::InvalidClaims;
+        }
+        if (audience_kind == JsonValueKind::String) {
+            claims.audience = std::encoding::json::document::value_view(&document, audience);
+        } else if (audience_kind == JsonValueKind::Array) {
+            claims.audience_is_array = true;
+        } else {
+            return JwtError::InvalidClaims;
+        }
+    }
+    if (
+        !optional_number(
+            &document,
+            member(&document, root, (&exp_key[0])as usize, 3, &mut scratch),
+            &mut claims.has_expiration,
+            &mut claims.expiration
+        )
+    ) {
+        return JwtError::InvalidClaims;
+    }
+    if (
+        !optional_number(
+            &document,
+            member(&document, root, (&nbf_key[0])as usize, 3, &mut scratch),
+            &mut claims.has_not_before,
+            &mut claims.not_before
+        )
+    ) {
+        return JwtError::InvalidClaims;
+    }
+    if (
+        !optional_number(
+            &document,
+            member(&document, root, (&iat_key[0])as usize, 3, &mut scratch),
+            &mut claims.has_issued_at,
+            &mut claims.issued_at
+        )
+    ) {
+        return JwtError::InvalidClaims;
+    }
+    *output = claims;
+    return JwtError::None;
+}
+
+public fn validate_time(RegisteredClaims& claims, i64 now, i64 leeway) -> JwtError {
+    if (leeway < 0) {
+        return JwtError::InvalidInput;
+    }
+
+    i64 earliest = now;
+    i64 latest = now;
+
+    if (leeway > 0) {
+        if (now < -9223372036854775807 - 1 + leeway) {
+            earliest = -9223372036854775807 - 1;
+        } else {
+            earliest = now - leeway;
+        }
+        if (now > 9223372036854775807 - leeway) {
+            latest = 9223372036854775807;
+        } else {
+            latest = now + leeway;
+        }
+    }
+    if (claims.has_expiration && earliest >= claims.expiration) {
+        return JwtError::Expired;
+    }
+    if (claims.has_not_before && latest < claims.not_before) {
+        return JwtError::NotYetValid;
+    }
+    if (claims.has_issued_at && latest < claims.issued_at) {
+        return JwtError::IssuedInFuture;
+    }
+    return JwtError::None;
+}

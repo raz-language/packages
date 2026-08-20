@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace postgres::receive;
+
 import core::result;
 import std::net;
 import postgres::wire;
+import postgres::wire as wire;
 
 public enum ReceiveError {
     InvalidBuffer,
@@ -72,9 +74,9 @@ public fn compact(Receiver&mut receiver) -> bool {
 }
 
 /// Borrows the next complete backend frame without consuming it.
-public fn peek(Receiver& receiver) -> Result<wire::MessageView, ReceiveError> {
+public fn peek(Receiver& receiver) -> Result<postgres::wire::MessageView, ReceiveError> {
     if (receiver.buffer == 0 || receiver.capacity <= 0) {
-        return Result<wire::MessageView, ReceiveError>::Error(ReceiveError::InvalidBuffer);
+        return Result<postgres::wire::MessageView, ReceiveError>::Error(ReceiveError::InvalidBuffer);
     }
     auto parsed = wire::parse_message(
         receiver.buffer + receiver.start,
@@ -82,14 +84,14 @@ public fn peek(Receiver& receiver) -> Result<wire::MessageView, ReceiveError> {
         receiver.max_message,
     );
     match parsed {
-        Result<wire::MessageView, wire::WireError>::Ok(message) => {
-            return Result<wire::MessageView, ReceiveError>::Ok(message);
+        Result<postgres::wire::MessageView, postgres::wire::WireError>::Ok(message) => {
+            return Result<postgres::wire::MessageView, ReceiveError>::Ok(message);
         }
-        Result<wire::MessageView, wire::WireError>::Error(wire::WireError::Incomplete) => {
-            return Result<wire::MessageView, ReceiveError>::Error(ReceiveError::NeedMore);
-        }
-        Result<wire::MessageView, wire::WireError>::Error(_) => {
-            return Result<wire::MessageView, ReceiveError>::Error(ReceiveError::Protocol);
+        Result<postgres::wire::MessageView, postgres::wire::WireError>::Error(error) => {
+            if (error == WireError::Incomplete) {
+                return Result<postgres::wire::MessageView, ReceiveError>::Error(ReceiveError::NeedMore);
+            }
+            return Result<postgres::wire::MessageView, ReceiveError>::Error(ReceiveError::Protocol);
         }
     }
 }

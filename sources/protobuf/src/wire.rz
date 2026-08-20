@@ -1,0 +1,25 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace protobuf::wire;
+
+import core::bytes;
+
+public enum WireType {
+    Varint,
+    Fixed64,
+    LengthDelimited,
+    StartGroup,
+    EndGroup,
+    Fixed32,
+}
+
+public struct Field {
+    i64 number;
+    WireType wire_type;
+    u64 varint_value;
+    u64 fixed64_value;
+    u32 fixed32_value;
+    BytesView payload;
+    i64 offset;
+}

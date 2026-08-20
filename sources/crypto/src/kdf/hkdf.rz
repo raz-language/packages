@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace crypto::kdf::hkdf;
+
 import crypto::mac::hmac;
+
 public const i64 SHA256_SIZE = 32;
 public const i64 SHA256_MAX_OUTPUT = 8160;
+
 /// RFC 5869 HKDF-Extract using HMAC-SHA-256.
 public fn extract(usize salt, i64 salt_length, usize ikm, i64 ikm_length, usize prk) -> bool {
     if (

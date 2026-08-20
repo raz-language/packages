@@ -1,25 +1,22 @@
 # jwt
 
-JWT, JWS, and JWK support for Raz.
+JWT, JWS, registered-claim, and JWK support for Raz.
 
-> **Status:** initial package scaffold. The public API is not stable yet.
+Version 0.1.0 implements compact HS256 signing and constant-work verification, strict unpadded base64url, JSON validation, symmetric JWK decoding, registered claim parsing, time validation with explicit leeway, and caller-configured algorithm/key/token-size policy.
 
-## Goals
+## Security defaults
 
-- [ ] compact serialization
-- [ ] JWS signing and verification
-- [ ] registered claims
-- [ ] JWK model
-- [ ] algorithm policy
+- `strict_policy()` permits only HS256, requires a 32-byte key, caps tokens at 1 MiB, and applies no implicit clock leeway.
+- The protected header must explicitly select HS256; unrecognized `crit` headers are rejected.
+- The algorithm is chosen by caller policy, never by dynamically dispatching on untrusted token text.
+- Signatures are compared in constant work and temporary MAC buffers are zeroized.
 
 ## Dependencies
 
-`crypto`, `serde`
+`crypto`, `encoding`, `json`
 
 ## Design rules
 
-- Native Raz implementation wherever practical.
-- Explicit errors through `Result` for recoverable failures.
-- Avoid hidden allocations on hot paths.
-- Keep the public surface small and composable.
-- Add malformed/adversarial-input tests for parser, protocol, and security code.
+- Token and payload output storage is caller-owned.
+- Registered string claim views borrow the decoded payload.
+- Unsupported JOSE algorithms fail closed and can be added as separate policy-gated implementations.

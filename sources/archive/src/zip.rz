@@ -1,0 +1,294 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace archive::zip;
+
+import archive::path;
+import core::bytes;
+import std::encoding::checksum;
+
+public enum ZipError {
+    None,
+    End,
+    InvalidInput,
+    Truncated,
+    InvalidHeader,
+    UnsupportedFeature,
+    UnsafePath,
+    ChecksumMismatch,
+    OutputFull,
+}
+
+public struct ZipEntry {
+    BytesView name;
+    BytesView data;
+    u32 crc32;
+    i64 method;
+    i64 flags;
+}
+
+public struct ZipReader {
+    BytesView source;
+    i64 cursor;
+    bool done;
+}
+
+public struct ZipRecord {
+    BytesView name;
+    u32 crc32;
+    i64 size;
+    i64 local_offset;
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn store(usize address, i64 value) {
+    unsafe {
+        *((address)as u8*mut) = value as u8;
+    }
+}
+
+fn le16(usize data) -> i64 {
+    return load(data) | (load(data + 1) << 8);
+}
+
+fn le32(usize data) -> u32 {
+    return (load(data)as u32) |
+        ((load(data + 1)as u32) << 8) |
+        ((load(data + 2)as u32) << 16) |
+        ((load(data + 3)as u32) << 24);
+}
+
+fn put16(usize output, i64 value) {
+    store(output, value);
+    store(output + 1, value >> 8);
+}
+
+fn put32(usize output, u32 value) {
+    store(output, value as i64);
+    store(output + 1, (value >> 8)as i64);
+    store(output + 2, (value >> 16)as i64);
+    store(output + 3, (value >> 24)as i64);
+}
+
+fn copy(usize output, usize input, i64 length) {
+    i64 i = 0;
+
+    while (i < length) {
+        store(output + i, load(input + i));
+        i += 1;
+    }
+}
+
+public fn reader(usize data, i64 length) -> ZipReader {
+    return ZipReader {
+        source: BytesView {
+            data: data,
+            length: length
+        },
+        cursor: 0,
+        done: length == 0
+    };
+}
+
+public fn next(ZipReader&mut reader, ZipEntry&mut output) -> ZipError {
+    if (reader.source.length < 0 || (reader.source.length > 0 && reader.source.data == 0)) {
+        return ZipError::InvalidInput;
+    }
+    if (reader.done) {
+        return ZipError::End;
+    }
+    if (reader.cursor > reader.source.length - 4) {
+        return ZipError::Truncated;
+    }
+
+    usize header = reader.source.data + reader.cursor;
+    u32 signature = le32(header);
+
+    if (signature == (0x02014b50 as u32) || signature == (0x06054b50 as u32)) {
+        reader.done = true;
+        return ZipError::End;
+    }
+    if (signature != (0x04034b50 as u32)) {
+        return ZipError::InvalidHeader;
+    }
+    if (reader.cursor > reader.source.length - 30) {
+        return ZipError::Truncated;
+    }
+
+    i64 flags = le16(header + 6);
+    i64 method = le16(header + 8);
+
+    if ((flags & 1) != 0 || (flags & 8) != 0 || method != 0) {
+        return ZipError::UnsupportedFeature;
+    }
+
+    u32 expected_crc = le32(header + 14);
+    i64 compressed = le32(header + 18)as i64;
+    i64 uncompressed = le32(header + 22)as i64;
+    i64 name_length = le16(header + 26);
+    i64 extra_length = le16(header + 28);
+
+    if (compressed != uncompressed) {
+        return ZipError::InvalidHeader;
+    }
+
+    i64 content = reader.cursor + 30 + name_length + extra_length;
+
+    if (
+        content < reader.cursor ||
+        content > reader.source.length ||
+        compressed > reader.source.length - content
+    ) {
+        return ZipError::Truncated;
+    }
+
+    usize name = reader.source.data + reader.cursor + 30;
+
+    if (!archive::path::safe(name, name_length)) {
+        return ZipError::UnsafePath;
+    }
+
+    usize data = reader.source.data + content;
+
+    if (std::encoding::checksum::crc32(data, uncompressed) != expected_crc) {
+        return ZipError::ChecksumMismatch;
+    }
+    *output = ZipEntry {
+        name: BytesView {
+            data: name,
+            length: name_length
+        },
+        data: BytesView {
+            data: data,
+            length: uncompressed
+        },
+        crc32: expected_crc,
+        method: method,
+        flags: flags,
+    };
+    reader.cursor = content + compressed;
+    return ZipError::None;
+}
+
+public fn write_local_stored(
+    usize output,
+    i64 capacity,
+    usize name,
+    i64 name_length,
+    usize data,
+    i64 size,
+    i64 local_offset,
+    ZipRecord&mut record,
+    i64&mut written,
+) -> ZipError {
+    *written = 0;
+    if (
+        !archive::path::safe(name, name_length) ||
+        name_length > 65535 ||
+        size < 0 ||
+        size > 4294967295 ||
+        (size > 0 && data == 0)
+    ) {
+        return ZipError::InvalidInput;
+    }
+
+    i64 required = 30 + name_length + size;
+
+    if (capacity < required || output == 0) {
+        return ZipError::OutputFull;
+    }
+
+    u32 crc = std::encoding::checksum::crc32(data, size);
+
+    put32(output, 0x04034b50 as u32);
+    put16(output + 4, 20);
+    put16(output + 6, 0);
+    put16(output + 8, 0);
+    put16(output + 10, 0);
+    put16(output + 12, 0);
+    put32(output + 14, crc);
+    put32(output + 18, size as u32);
+    put32(output + 22, size as u32);
+    put16(output + 26, name_length);
+    put16(output + 28, 0);
+    copy(output + 30, name, name_length);
+    if (size > 0) {
+        copy(output + 30 + name_length, data, size);
+    }
+    *record = ZipRecord {
+        name: BytesView {
+            data: name,
+            length: name_length
+        },
+        crc32: crc,
+        size: size,
+        local_offset: local_offset
+    };
+    *written = required;
+    return ZipError::None;
+}
+
+public fn write_central_stored(usize output, i64 capacity, ZipRecord& record, i64&mut written) -> ZipError {
+    *written = 0;
+
+    i64 required = 46 + record.name.length;
+
+    if (capacity < required || output == 0 || record.local_offset < 0 || record.local_offset > 4294967295) {
+        return ZipError::OutputFull;
+    }
+    put32(output, 0x02014b50 as u32);
+    put16(output + 4, 20);
+    put16(output + 6, 20);
+    put16(output + 8, 0);
+    put16(output + 10, 0);
+    put16(output + 12, 0);
+    put16(output + 14, 0);
+    put32(output + 16, record.crc32);
+    put32(output + 20, record.size as u32);
+    put32(output + 24, record.size as u32);
+    put16(output + 28, record.name.length);
+    put16(output + 30, 0);
+    put16(output + 32, 0);
+    put16(output + 34, 0);
+    put16(output + 36, 0);
+    put32(output + 38, 0);
+    put32(output + 42, record.local_offset as u32);
+    copy(output + 46, record.name.data, record.name.length);
+    *written = required;
+    return ZipError::None;
+}
+
+public fn write_end(
+    usize output,
+    i64 capacity,
+    i64 entries,
+    i64 central_size,
+    i64 central_offset
+) -> ZipError {
+    if (
+        output == 0 ||
+        capacity < 22 ||
+        entries < 0 ||
+        entries > 65535 ||
+        central_size < 0 ||
+        central_size > 4294967295 ||
+        central_offset < 0 ||
+        central_offset > 4294967295
+    ) {
+        return ZipError::OutputFull;
+    }
+    put32(output, 0x06054b50 as u32);
+    put16(output + 4, 0);
+    put16(output + 6, 0);
+    put16(output + 8, entries);
+    put16(output + 10, entries);
+    put32(output + 12, central_size as u32);
+    put32(output + 16, central_offset as u32);
+    put16(output + 20, 0);
+    return ZipError::None;
+}

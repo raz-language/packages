@@ -1,3 +1,3 @@
 # testing examples
 
-Small executable examples demonstrating stable `testing` APIs live here.
+- `property.rz` runs a deterministic bounded property loop.

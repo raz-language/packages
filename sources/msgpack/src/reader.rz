@@ -1,0 +1,297 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace msgpack::reader;
+
+import core::bytes;
+import msgpack::error;
+import msgpack::value;
+
+public struct MsgpackReader {
+    BytesView source;
+    i64 cursor;
+}
+
+fn load(usize address) -> u64 {
+    unsafe {
+        return (*((address)as u8*const))as u64;
+    }
+}
+
+public fn create(usize data, i64 length) -> MsgpackReader {
+    return MsgpackReader {
+        source: BytesView {
+            data: data,
+            length: length
+        },
+        cursor: 0,
+    };
+}
+
+public fn position(MsgpackReader& reader) -> i64 {
+    return reader.cursor;
+}
+
+fn remaining(MsgpackReader& reader) -> i64 {
+    if (reader.cursor < 0 || reader.cursor > reader.source.length) {
+        return 0;
+    }
+    return reader.source.length - reader.cursor;
+}
+
+fn read_be(MsgpackReader&mut reader, i64 width, u64&mut output) -> MsgpackError {
+    if (width > remaining(reader)) {
+        return MsgpackError::UnexpectedEnd;
+    }
+
+    u64 value = 0;
+    i64 i = 0;
+
+    while (i < width) {
+        value = (value << 8) | load(reader.source.data + reader.cursor + i);
+        i += 1;
+    }
+    reader.cursor += width;
+    *output = value;
+    return MsgpackError::None;
+}
+
+fn payload(MsgpackReader&mut reader, u64 length, BytesView&mut output) -> MsgpackError {
+    if (length > 9223372036854775807) {
+        return MsgpackError::LengthOverflow;
+    }
+
+    i64 signed_length = length as i64;
+
+    if (signed_length > remaining(reader)) {
+        return MsgpackError::UnexpectedEnd;
+    }
+    *output = BytesView {
+        data: reader.source.data + reader.cursor,
+        length: signed_length
+    };
+    reader.cursor += signed_length;
+    return MsgpackError::None;
+}
+
+public fn next(MsgpackReader&mut reader, MsgpackItem&mut output) -> MsgpackError {
+    if (
+        reader.source.length < 0 ||
+        (reader.source.length > 0 && reader.source.data == 0) ||
+        reader.cursor < 0 ||
+        reader.cursor > reader.source.length
+    ) {
+        return MsgpackError::InvalidInput;
+    }
+    if (reader.cursor == reader.source.length) {
+        return MsgpackError::End;
+    }
+
+    i64 start = reader.cursor;
+    i64 marker = load(reader.source.data + reader.cursor)as i64;
+
+    reader.cursor += 1;
+
+    MsgpackKind kind = MsgpackKind::Nil;
+    u64 unsigned_value = 0;
+    i64 signed_value = 0;
+    u64 count = 0;
+
+    BytesView bytes = BytesView {
+        data: 0,
+        length: 0
+    };
+
+    i64 value_width = 0;
+    bool signed_integer = false;
+    bool string_payload = false;
+    bool binary_payload = false;
+
+    if (marker <= 127) {
+        kind = MsgpackKind::Unsigned;
+        unsigned_value = marker as u64;
+    } else if (marker >= 224) {
+        kind = MsgpackKind::Signed;
+        signed_value = marker - 256;
+    } else if (marker >= 128 && marker <= 143) {
+        kind = MsgpackKind::Map;
+        count = (marker & 15)as u64;
+    } else if (marker >= 144 && marker <= 159) {
+        kind = MsgpackKind::Array;
+        count = (marker & 15)as u64;
+    } else if (marker >= 160 && marker <= 191) {
+        kind = MsgpackKind::String;
+        unsigned_value = (marker & 31)as u64;
+        string_payload = true;
+    } else if (marker == 192) {
+        kind = MsgpackKind::Nil;
+    } else if (marker == 194) {
+        kind = MsgpackKind::False;
+    } else if (marker == 195) {
+        kind = MsgpackKind::True;
+    } else if (marker >= 196 && marker <= 198) {
+        kind = MsgpackKind::Binary;
+        binary_payload = true;
+        if (marker == 196) {
+            value_width = 1;
+        } else if (marker == 197) {
+            value_width = 2;
+        } else {
+            value_width = 4;
+        }
+    } else if (marker == 202 || marker == 203) {
+        if (marker == 202) {
+            kind = MsgpackKind::Float32;
+            value_width = 4;
+        } else {
+            kind = MsgpackKind::Float64;
+            value_width = 8;
+        }
+    } else if (marker >= 204 && marker <= 207) {
+        kind = MsgpackKind::Unsigned;
+        value_width = 1 << (marker - 204);
+    } else if (marker >= 208 && marker <= 211) {
+        kind = MsgpackKind::Signed;
+        signed_integer = true;
+        value_width = 1 << (marker - 208);
+    } else if (marker >= 217 && marker <= 219) {
+        kind = MsgpackKind::String;
+        string_payload = true;
+        if (marker == 217) {
+            value_width = 1;
+        } else if (marker == 218) {
+            value_width = 2;
+        } else {
+            value_width = 4;
+        }
+    } else if (marker == 220 || marker == 221) {
+        kind = MsgpackKind::Array;
+        if (marker == 220) {
+            value_width = 2;
+        } else {
+            value_width = 4;
+        }
+    } else if (marker == 222 || marker == 223) {
+        kind = MsgpackKind::Map;
+        if (marker == 222) {
+            value_width = 2;
+        } else {
+            value_width = 4;
+        }
+    } else {
+        reader.cursor = start;
+        return MsgpackError::UnsupportedType;
+    }
+    if (value_width > 0) {
+        MsgpackError read_error = read_be(reader, value_width, &mut unsigned_value);
+
+        if (read_error != MsgpackError::None) {
+            reader.cursor = start;
+            return read_error;
+        }
+    }
+    if (signed_integer) {
+        if (value_width == 1) {
+            if (unsigned_value >= 128) {
+                signed_value = (unsigned_value as i64) - 256;
+            } else {
+                signed_value = unsigned_value as i64;
+            }
+        } else if (value_width == 2) {
+            if (unsigned_value >= 32768) {
+                signed_value = (unsigned_value as i64) - 65536;
+            } else {
+                signed_value = unsigned_value as i64;
+            }
+        } else if (value_width == 4) {
+            if (unsigned_value >= 2147483648) {
+                signed_value = (unsigned_value as i64) - 4294967296;
+            } else {
+                signed_value = unsigned_value as i64;
+            }
+        } else {
+            signed_value = unsigned_value as i64;
+        }
+    }
+    if ((kind == MsgpackKind::Array || kind == MsgpackKind::Map) && value_width > 0) {
+        count = unsigned_value;
+    }
+    if (string_payload || binary_payload) {
+        MsgpackError payload_error = payload(reader, unsigned_value, &mut bytes);
+
+        if (payload_error != MsgpackError::None) {
+            reader.cursor = start;
+            return payload_error;
+        }
+    }
+    *output = MsgpackItem {
+        kind: kind,
+        unsigned_value: unsigned_value,
+        signed_value: signed_value,
+        count: count,
+        payload: bytes,
+        offset: start,
+        header_length: reader.cursor - start - bytes.length,
+    };
+    return MsgpackError::None;
+}
+
+public fn integer(MsgpackItem& item, i64&mut output) -> MsgpackError {
+    if (item.kind == MsgpackKind::Signed) {
+        *output = item.signed_value;
+        return MsgpackError::None;
+    }
+    if (item.kind == MsgpackKind::Unsigned) {
+        if (item.unsigned_value > 9223372036854775807) {
+            return MsgpackError::IntegerOverflow;
+        }
+        *output = item.unsigned_value as i64;
+        return MsgpackError::None;
+    }
+    return MsgpackError::TypeMismatch;
+}
+
+fn skip_inner(MsgpackReader&mut reader, i64 depth, i64 maximum_depth) -> MsgpackError {
+    if (depth > maximum_depth) {
+        return MsgpackError::DepthExceeded;
+    }
+
+    MsgpackItem item;
+    MsgpackError error = next(reader, &mut item);
+
+    if (error != MsgpackError::None) {
+        return error;
+    }
+
+    u64 children = 0;
+
+    if (item.kind == MsgpackKind::Array) {
+        children = item.count;
+    } else if (item.kind == MsgpackKind::Map) {
+        if (item.count > 9223372036854775807) {
+            return MsgpackError::LengthOverflow;
+        }
+        children = item.count * 2;
+    }
+    if (children > 9223372036854775807) {
+        return MsgpackError::LengthOverflow;
+    }
+
+    i64 i = 0;
+
+    while (i < children as i64) {
+        error = skip_inner(reader, depth + 1, maximum_depth);
+        if (error != MsgpackError::None) {
+            return error;
+        }
+        i += 1;
+    }
+    return MsgpackError::None;
+}
+
+public fn skip(MsgpackReader&mut reader, i64 maximum_depth) -> MsgpackError {
+    if (maximum_depth < 0) {
+        return MsgpackError::InvalidInput;
+    }
+    return skip_inner(reader, 0, maximum_depth);
+}

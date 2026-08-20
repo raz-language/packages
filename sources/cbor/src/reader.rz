@@ -1,0 +1,236 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace cbor::reader;
+
+import cbor::error;
+import cbor::value;
+import core::bytes;
+
+public struct CborReader {
+    BytesView source;
+    i64 cursor;
+}
+
+fn load(usize address) -> u64 {
+    unsafe {
+        return (*((address)as u8*const))as u64;
+    }
+}
+
+public fn create(usize data, i64 length) -> CborReader {
+    return CborReader {
+        source: BytesView {
+            data: data,
+            length: length
+        },
+        cursor: 0,
+    };
+}
+
+public fn position(CborReader& reader) -> i64 {
+    return reader.cursor;
+}
+
+public fn remaining(CborReader& reader) -> i64 {
+    if (reader.cursor < 0 || reader.cursor > reader.source.length) {
+        return 0;
+    }
+    return reader.source.length - reader.cursor;
+}
+
+fn read_argument(CborReader&mut reader, i64 info, u64&mut output) -> CborError {
+    if (info < 24) {
+        *output = info as u64;
+        return CborError::None;
+    }
+    if (info == 31) {
+        return CborError::IndefiniteUnsupported;
+    }
+
+    i64 width = 0;
+
+    if (info == 24) {
+        width = 1;
+    } else if (info == 25) {
+        width = 2;
+    } else if (info == 26) {
+        width = 4;
+    } else if (info == 27) {
+        width = 8;
+    } else {
+        return CborError::InvalidAdditionalInfo;
+    }
+    if (width > remaining(reader)) {
+        return CborError::UnexpectedEnd;
+    }
+
+    u64 value = 0;
+    i64 i = 0;
+
+    while (i < width) {
+        value = (value << 8) | load(reader.source.data + reader.cursor + i);
+        i += 1;
+    }
+    reader.cursor += width;
+    *output = value;
+    return CborError::None;
+}
+
+public fn next(CborReader&mut reader, CborItem&mut output) -> CborError {
+    if (
+        reader.source.length < 0 ||
+        (reader.source.length > 0 && reader.source.data == 0) ||
+        reader.cursor < 0 ||
+        reader.cursor > reader.source.length
+    ) {
+        return CborError::InvalidInput;
+    }
+    if (reader.cursor == reader.source.length) {
+        return CborError::End;
+    }
+
+    i64 start = reader.cursor;
+    i64 initial = load(reader.source.data + reader.cursor)as i64;
+
+    reader.cursor += 1;
+
+    i64 major = initial >> 5;
+    i64 info = initial & 31;
+    u64 argument = 0;
+    CborError argument_error = read_argument(reader, info, &mut argument);
+
+    if (argument_error != CborError::None) {
+        reader.cursor = start;
+        return argument_error;
+    }
+
+    CborKind kind = CborKind::Simple;
+
+    BytesView payload = BytesView {
+        data: 0,
+        length: 0
+    };
+    if (major == 0) {
+        kind = CborKind::Unsigned;
+    } else if (major == 1) {
+        kind = CborKind::Negative;
+    } else if (major == 2 || major == 3) {
+        if (argument > 9223372036854775807) {
+            reader.cursor = start;
+            return CborError::LengthOverflow;
+        }
+
+        i64 length = argument as i64;
+
+        if (length > remaining(reader)) {
+            reader.cursor = start;
+            return CborError::UnexpectedEnd;
+        }
+        payload = BytesView {
+            data: reader.source.data + reader.cursor,
+            length: length
+        };
+        reader.cursor += length;
+        if (major == 2) {
+            kind = CborKind::Bytes;
+        } else {
+            kind = CborKind::Text;
+        }
+    } else if (major == 4) {
+        kind = CborKind::Array;
+    } else if (major == 5) {
+        kind = CborKind::Map;
+    } else if (major == 6) {
+        kind = CborKind::Tag;
+    } else if (major == 7) {
+        if (info == 20) {
+            kind = CborKind::False;
+        } else if (info == 21) {
+            kind = CborKind::True;
+        } else if (info == 22) {
+            kind = CborKind::Null;
+        } else if (info == 23) {
+            kind = CborKind::Undefined;
+        } else if (info == 25) {
+            kind = CborKind::Float16;
+        } else if (info == 26) {
+            kind = CborKind::Float32;
+        } else if (info == 27) {
+            kind = CborKind::Float64;
+        }
+    }
+    *output = CborItem {
+        kind: kind,
+        argument: argument,
+        payload: payload,
+        offset: start,
+        header_length: reader.cursor - start - payload.length,
+    };
+    return CborError::None;
+}
+
+public fn integer(CborItem& item, i64&mut output) -> CborError {
+    if (item.kind == CborKind::Unsigned) {
+        if (item.argument > 9223372036854775807) {
+            return CborError::IntegerOverflow;
+        }
+        *output = item.argument as i64;
+        return CborError::None;
+    }
+    if (item.kind == CborKind::Negative) {
+        if (item.argument > 9223372036854775807) {
+            return CborError::IntegerOverflow;
+        }
+        *output = -1 - (item.argument as i64);
+        return CborError::None;
+    }
+    return CborError::TypeMismatch;
+}
+
+fn skip_inner(CborReader&mut reader, i64 depth, i64 maximum_depth) -> CborError {
+    if (depth > maximum_depth) {
+        return CborError::DepthExceeded;
+    }
+
+    CborItem item;
+    CborError error = next(reader, &mut item);
+
+    if (error != CborError::None) {
+        return error;
+    }
+
+    u64 children = 0;
+
+    if (item.kind == CborKind::Array) {
+        children = item.argument;
+    } else if (item.kind == CborKind::Map) {
+        if (item.argument > 9223372036854775807) {
+            return CborError::LengthOverflow;
+        }
+        children = item.argument * 2;
+    } else if (item.kind == CborKind::Tag) {
+        children = 1;
+    }
+    if (children > 9223372036854775807) {
+        return CborError::LengthOverflow;
+    }
+
+    i64 i = 0;
+
+    while (i < children as i64) {
+        error = skip_inner(reader, depth + 1, maximum_depth);
+        if (error != CborError::None) {
+            return error;
+        }
+        i += 1;
+    }
+    return CborError::None;
+}
+
+public fn skip(CborReader&mut reader, i64 maximum_depth) -> CborError {
+    if (maximum_depth < 0) {
+        return CborError::InvalidInput;
+    }
+    return skip_inner(reader, 0, maximum_depth);
+}

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace datetime::timestamp;
+
 import datetime::calendar;
 import datetime::types;
 import datetime::duration;
@@ -9,102 +10,120 @@ import datetime::duration;
 extern fn raz_rt_time_unix_millis() -> i64;
 
 public struct Timestamp {
-  i64 seconds;
-  i64 nanoseconds;
+    i64 seconds;
+    i64 nanoseconds;
 }
 
 fn floor_div(i64 value, i64 divisor) -> i64 {
-  i64 quotient = value / divisor;
-  i64 remainder = value % divisor;
-  if (remainder < 0) {
-    quotient -= 1;
-  }
-  return quotient;
+    i64 quotient = value / divisor;
+    i64 remainder = value % divisor;
+
+    if (remainder < 0) {
+        quotient -= 1;
+    }
+    return quotient;
 }
 
 fn normalize(i64 seconds, i64 nanoseconds) -> Timestamp {
-  seconds += nanoseconds / 1000000000;
-  nanoseconds %= 1000000000;
-  if (nanoseconds < 0) {
-    nanoseconds += 1000000000;
-    seconds -= 1;
-  }
-  return Timestamp { seconds: seconds, nanoseconds: nanoseconds };
+    seconds += nanoseconds / 1000000000;
+    nanoseconds %= 1000000000;
+    if (nanoseconds < 0) {
+        nanoseconds += 1000000000;
+        seconds -= 1;
+    }
+    return Timestamp {
+        seconds: seconds,
+        nanoseconds: nanoseconds
+    };
 }
 
 public fn now() -> Timestamp {
-  i64 millis = raz_rt_time_unix_millis();
-  return normalize(millis / 1000, (millis % 1000) * 1000000);
+    i64 millis = raz_rt_time_unix_millis();
+
+    return normalize(millis / 1000, (millis % 1000) * 1000000);
 }
 
 public fn from_unix_seconds(i64 seconds) -> Timestamp {
-  return Timestamp { seconds: seconds, nanoseconds: 0 };
+    return Timestamp {
+        seconds: seconds,
+        nanoseconds: 0
+    };
 }
 
 public fn from_unix_millis(i64 millis) -> Timestamp {
-  return normalize(millis / 1000, (millis % 1000) * 1000000);
+    return normalize(millis / 1000, (millis % 1000) * 1000000);
 }
 
 public fn unix_seconds(Timestamp& value) -> i64 {
-  return value.seconds;
+    return value.seconds;
 }
 
 public fn unix_millis(Timestamp& value) -> i64 {
-  return value.seconds * 1000 + value.nanoseconds / 1000000;
+    return value.seconds * 1000 + value.nanoseconds / 1000000;
 }
 
 public fn add(Timestamp& value, Duration& duration) -> Timestamp {
-  return normalize(value.seconds + duration.seconds, value.nanoseconds + duration.nanoseconds);
+    return normalize(value.seconds + duration.seconds, value.nanoseconds + duration.nanoseconds);
 }
 
 public fn sub(Timestamp& value, Duration& duration) -> Timestamp {
-  return normalize(value.seconds - duration.seconds, value.nanoseconds - duration.nanoseconds);
+    return normalize(value.seconds - duration.seconds, value.nanoseconds - duration.nanoseconds);
 }
 
 public fn difference(Timestamp& left, Timestamp& right) -> Duration {
-  return datetime::duration::new(left.seconds - right.seconds, left.nanoseconds - right.nanoseconds);
+    return datetime::duration::new(left.seconds - right.seconds, left.nanoseconds - right.nanoseconds);
 }
 
 public fn compare(Timestamp& left, Timestamp& right) -> i64 {
-  if (left.seconds < right.seconds) {
-    return -1;
-  }
-  if (left.seconds > right.seconds) {
-    return 1;
-  }
-  if (left.nanoseconds < right.nanoseconds) {
-    return -1;
-  }
-  if (left.nanoseconds > right.nanoseconds) {
-    return 1;
-  }
-  return 0;
+    if (left.seconds < right.seconds) {
+        return -1;
+    }
+    if (left.seconds > right.seconds) {
+        return 1;
+    }
+    if (left.nanoseconds < right.nanoseconds) {
+        return -1;
+    }
+    if (left.nanoseconds > right.nanoseconds) {
+        return 1;
+    }
+    return 0;
 }
 
 public fn from_datetime(DateTime& value, UtcOffset& offset, Timestamp&mut output) -> bool {
-  if (!datetime::types::valid_datetime(value)) {
-    return false;
-  }
-  Date date = Date { year: value.year, month: value.month, day: value.day };
-  i64 days = datetime::calendar::to_unix_days(&date);
-  i64 seconds = days * 86400 + value.hour * 3600 + value.minute * 60 + value.second;
-  seconds -= offset.seconds;
-  *output = Timestamp { seconds: seconds, nanoseconds: value.nanosecond };
-  return true;
+    if (!datetime::types::valid_datetime(value)) {
+        return false;
+    }
+    Date date = Date {
+        year: value.year,
+        month: value.month,
+        day: value.day
+    };
+
+    i64 days = datetime::calendar::to_unix_days(&date);
+    i64 seconds = days * 86400 + value.hour * 3600 + value.minute * 60 + value.second;
+
+    seconds -= offset.seconds;
+    *output = Timestamp {
+        seconds: seconds,
+        nanoseconds: value.nanosecond
+    };
+    return true;
 }
 
 public fn to_datetime(Timestamp& value, UtcOffset& offset) -> DateTime {
-  i64 local_seconds = value.seconds + offset.seconds;
-  i64 days = floor_div(local_seconds, 86400);
-  i64 second_of_day = local_seconds - days * 86400;
-  Date date = datetime::calendar::from_unix_days(days);
-  return DateTime {
-    year: date.year,
-    month: date.month,
-    day: date.day,
-    hour: second_of_day / 3600,
-    minute: (second_of_day % 3600) / 60,
-    second: second_of_day % 60,
-    nanosecond: value.nanoseconds,
-  };
+    i64 local_seconds = value.seconds + offset.seconds;
+    i64 days = floor_div(local_seconds, 86400);
+    i64 second_of_day = local_seconds - days * 86400;
+    Date date = datetime::calendar::from_unix_days(days);
+
+    return DateTime {
+        year: date.year,
+        month: date.month,
+        day: date.day,
+        hour: second_of_day / 3600,
+        minute: (second_of_day % 3600) / 60,
+        second: second_of_day % 60,
+        nanosecond: value.nanoseconds,
+    };
 }

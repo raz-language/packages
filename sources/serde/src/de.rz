@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace serde::de;
+
 import alloc::string;
 public import serde::error;
 
@@ -39,18 +40,64 @@ public trait Deserializer {
     fn end_map(Self&mut self) -> SerdeError;
 }
 
+// Keeps the object-safe interface independently type-checkable before a format
+// package contributes its concrete deserializer implementation.
+struct UnsupportedDeserializer {}
+
+impl Deserializer for UnsupportedDeserializer {
+    fn kind(UnsupportedDeserializer& self) -> ValueKind {
+        return ValueKind::End;
+    }
+    fn read_null(UnsupportedDeserializer&mut self) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn read_bool(UnsupportedDeserializer&mut self, bool&mut output) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn read_i64(UnsupportedDeserializer&mut self, i64&mut output) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn read_u64(UnsupportedDeserializer&mut self, u64&mut output) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn read_f64(UnsupportedDeserializer&mut self, f64&mut output) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn read_bytes(UnsupportedDeserializer&mut self, usize&mut data, i64&mut length, ) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn read_string(UnsupportedDeserializer&mut self, usize&mut data, i64&mut length, ) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn begin_sequence(UnsupportedDeserializer&mut self, i64&mut length) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn sequence_has_next(UnsupportedDeserializer&mut self) -> bool {
+        return false;
+    }
+    fn end_sequence(UnsupportedDeserializer&mut self) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn begin_map(UnsupportedDeserializer&mut self, i64&mut length) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn map_has_next(UnsupportedDeserializer&mut self) -> bool {
+        return false;
+    }
+    fn read_key(UnsupportedDeserializer&mut self, usize&mut data, i64&mut length, ) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+    fn end_map(UnsupportedDeserializer&mut self) -> SerdeError {
+        return SerdeError::Unsupported;
+    }
+}
+
 public trait Deserialize {
     fn deserialize(Self&mut self, dyn Deserializer deserializer) -> SerdeError;
 }
 
 public fn decode<T: Deserialize>(T&mut value, dyn Deserializer deserializer) -> SerdeError {
     return value.deserialize(deserializer);
-}
-
-impl Deserialize for bool {
-    fn deserialize(bool&mut self, dyn Deserializer deserializer) -> SerdeError {
-        return deserializer.read_bool(self);
-    }
 }
 
 impl Deserialize for i64 {

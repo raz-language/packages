@@ -1,0 +1,9 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace msgpack;
+
+public import msgpack::error;
+public import msgpack::reader;
+public import msgpack::value;
+public import msgpack::writer;

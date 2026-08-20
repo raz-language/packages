@@ -1,0 +1,559 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace yaml::reader;
+
+import core::bytes;
+import yaml::error;
+import yaml::value;
+
+public struct YamlReader {
+    BytesView source;
+    i64 cursor;
+    i64 line_number;
+    i64 maximum_indent;
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn store(usize address, i64 value) {
+    unsafe {
+        *((address)as u8*mut) = value as u8;
+    }
+}
+
+public fn create(usize data, i64 length, i64 maximum_indent) -> YamlReader {
+    i64 cursor = 0;
+
+    if (length >= 3 && data != 0 && load(data) == 239 && load(data + 1) == 187 && load(data + 2) == 191) {
+        cursor = 3;
+    }
+    return YamlReader {
+        source: BytesView {
+            data: data,
+            length: length
+        },
+        cursor: cursor,
+        line_number: 0,
+        maximum_indent: maximum_indent,
+    };
+}
+
+public fn position(YamlReader& reader) -> i64 {
+    return reader.cursor;
+}
+
+fn whitespace(i64 byte) -> bool {
+    return byte == 32 || byte == 9;
+}
+
+fn trim_end(usize data, i64 start, i64 end) -> i64 {
+    while (end > start && whitespace(load(data + end - 1))) {
+        end -= 1;
+    }
+    return end;
+}
+
+fn trim_start(usize data, i64 start, i64 end) -> i64 {
+    while (start < end && whitespace(load(data + start))) {
+        start += 1;
+    }
+    return start;
+}
+
+fn lower(i64 byte) -> i64 {
+    if (byte >= 65 && byte <= 90) {
+        return byte + 32;
+    }
+    return byte;
+}
+
+fn exact3(usize data, i64 length, i64 a, i64 b, i64 c) -> bool {
+    return length == 3 && load(data) == a && load(data + 1) == b && load(data + 2) == c;
+}
+
+fn structural_end(usize data, i64 start, i64 end, i64&mut output) -> YamlError {
+    bool single = false;
+    bool double = false;
+    bool escaped = false;
+    i64 cursor = start;
+
+    while (cursor < end) {
+        i64 byte = load(data + cursor);
+
+        if (double) {
+            if (escaped) {
+                escaped = false;
+            } else if (byte == 92) {
+                escaped = true;
+            } else if (byte == 34) {
+                double = false;
+            }
+        } else if (single) {
+            if (byte == 39) {
+                if (cursor + 1 < end && load(data + cursor + 1) == 39) {
+                    cursor += 1;
+                } else {
+                    single = false;
+                }
+            }
+        } else if (byte == 34) {
+            double = true;
+        } else if (byte == 39) {
+            single = true;
+        } else if (byte == 35 && (cursor == start || whitespace(load(data + cursor - 1)))) {
+            end = cursor;
+            break;
+        }
+        cursor += 1;
+    }
+    if (single || double || escaped) {
+        return YamlError::UnterminatedQuote;
+    }
+    *output = trim_end(data, start, end);
+    return YamlError::None;
+}
+
+fn mapping_colon(usize data, i64 start, i64 end) -> i64 {
+    bool single = false;
+    bool double = false;
+    bool escaped = false;
+    i64 cursor = start;
+
+    while (cursor < end) {
+        i64 byte = load(data + cursor);
+
+        if (double) {
+            if (escaped) {
+                escaped = false;
+            } else if (byte == 92) {
+                escaped = true;
+            } else if (byte == 34) {
+                double = false;
+            }
+        } else if (single) {
+            if (byte == 39) {
+                if (cursor + 1 < end && load(data + cursor + 1) == 39) {
+                    cursor += 1;
+                } else {
+                    single = false;
+                }
+            }
+        } else if (byte == 34) {
+            double = true;
+        } else if (byte == 39) {
+            single = true;
+        } else if (byte == 58 && (cursor + 1 == end || whitespace(load(data + cursor + 1)))) {
+            return cursor;
+        }
+        cursor += 1;
+    }
+    return -1;
+}
+
+fn unsupported_scalar(usize data, i64 length) -> bool {
+    if (length <= 0) {
+        return false;
+    }
+
+    i64 first = load(data);
+
+    return first == 38 ||
+        first == 42 ||
+        first == 33 ||
+        first == 124 ||
+        first == 62 ||
+        first == 91 ||
+        first == 123;
+}
+
+fn numeric_kind(usize data, i64 length) -> YamlScalarKind {
+    if (length <= 0) {
+        return YamlScalarKind::Empty;
+    }
+
+    i64 cursor = 0;
+
+    if (load(data) == 43 || load(data) == 45) {
+        cursor = 1;
+    }
+    if (cursor == length) {
+        return YamlScalarKind::String;
+    }
+
+    bool digit = false;
+    bool decimal = false;
+    bool exponent = false;
+
+    while (cursor < length) {
+        i64 byte = load(data + cursor);
+
+        if (byte >= 48 && byte <= 57) {
+            digit = true;
+        } else if (byte == 46 && !decimal && !exponent) {
+            decimal = true;
+        } else if ((byte == 101 || byte == 69) && digit && !exponent) {
+            exponent = true;
+            digit = false;
+            if (cursor + 1 < length && (load(data + cursor + 1) == 43 || load(data + cursor + 1) == 45)) {
+                cursor += 1;
+            }
+        } else {
+            return YamlScalarKind::String;
+        }
+        cursor += 1;
+    }
+    if (!digit) {
+        return YamlScalarKind::String;
+    }
+    if (decimal || exponent) {
+        return YamlScalarKind::Float;
+    }
+    return YamlScalarKind::Integer;
+}
+
+public fn scalar_kind(BytesView value) -> YamlScalarKind {
+    if (value.length <= 0) {
+        return YamlScalarKind::Empty;
+    }
+    if (load(value.data) == 34 || load(value.data) == 39) {
+        return YamlScalarKind::String;
+    }
+    if (value.length == 1 && load(value.data) == 126) {
+        return YamlScalarKind::Null;
+    }
+    if (
+        value.length == 4 &&
+        lower(load(value.data)) == 110 &&
+        lower(load(value.data + 1)) == 117 &&
+        lower(load(value.data + 2)) == 108 &&
+        lower(load(value.data + 3)) == 108
+    ) {
+        return YamlScalarKind::Null;
+    }
+    if (
+        (
+            value.length == 4 &&
+            lower(load(value.data)) == 116 &&
+            lower(load(value.data + 1)) == 114 &&
+            lower(load(value.data + 2)) == 117 &&
+            lower(load(value.data + 3)) == 101
+        ) ||
+        (
+            value.length == 5 &&
+            lower(load(value.data)) == 102 &&
+            lower(load(value.data + 1)) == 97 &&
+            lower(load(value.data + 2)) == 108 &&
+            lower(load(value.data + 3)) == 115 &&
+            lower(load(value.data + 4)) == 101
+        )
+    ) {
+        return YamlScalarKind::Boolean;
+    }
+    return numeric_kind(value.data, value.length);
+}
+
+fn line_value(usize data, i64 start, i64 end) -> BytesView {
+    start = trim_start(data, start, end);
+    end = trim_end(data, start, end);
+    return BytesView {
+        data: data + start,
+        length: end - start
+    };
+}
+
+fn validate_scalar(BytesView value) -> YamlError {
+    if (value.length <= 0) {
+        return YamlError::None;
+    }
+
+    i64 first = load(value.data);
+
+    if ((first == 34 || first == 39) && (value.length < 2 || load(value.data + value.length - 1) != first)) {
+        return YamlError::UnterminatedQuote;
+    }
+    if (unsupported_scalar(value.data, value.length)) {
+        return YamlError::UnsupportedFeature;
+    }
+    return YamlError::None;
+}
+
+public fn next(YamlReader&mut reader, YamlLine&mut output) -> YamlError {
+    if (
+        reader.source.length < 0 ||
+        (reader.source.length > 0 && reader.source.data == 0) ||
+        reader.cursor < 0 ||
+        reader.cursor > reader.source.length ||
+        reader.maximum_indent < 0
+    ) {
+        return YamlError::InvalidInput;
+    }
+    while (reader.cursor < reader.source.length) {
+        i64 line_start = reader.cursor;
+        i64 line_end = line_start;
+
+        while (
+            line_end < reader.source.length &&
+            load(reader.source.data + line_end) != 10 &&
+            load(reader.source.data + line_end) != 13
+        ) {
+            line_end += 1;
+        }
+        if (line_end < reader.source.length && load(reader.source.data + line_end) == 13) {
+            if (line_end + 1 >= reader.source.length || load(reader.source.data + line_end + 1) != 10) {
+                return YamlError::InvalidLineEnding;
+            }
+            reader.cursor = line_end + 2;
+        } else if (line_end < reader.source.length) {
+            reader.cursor = line_end + 1;
+        } else {
+            reader.cursor = line_end;
+        }
+        reader.line_number += 1;
+
+        i64 indent = 0;
+
+        while (line_start + indent < line_end && load(reader.source.data + line_start + indent) == 32) {
+            indent += 1;
+        }
+        if (line_start + indent < line_end && load(reader.source.data + line_start + indent) == 9) {
+            return YamlError::TabIndentation;
+        }
+        if (indent > reader.maximum_indent) {
+            return YamlError::IndentExceeded;
+        }
+
+        i64 content_start = line_start + indent;
+        i64 content_end = line_end;
+
+        YamlError structural = structural_end(
+            reader.source.data,
+            content_start,
+            content_end,
+            &mut content_end
+        );
+        if (structural != YamlError::None) {
+            return structural;
+        }
+        if (content_start == content_end) {
+            continue;
+        }
+        if (exact3(reader.source.data + content_start, content_end - content_start, 45, 45, 45)) {
+            *output = YamlLine {
+                kind: YamlLineKind::DocumentStart,
+                scalar_kind: YamlScalarKind::Empty,
+                indent: indent,
+                line_number: reader.line_number,
+                key: BytesView {
+                    data: 0,
+                    length: 0
+                },
+                value: BytesView {
+                    data: 0,
+                    length: 0
+                },
+                has_value: false,
+            };
+            return YamlError::None;
+        }
+        if (exact3(reader.source.data + content_start, content_end - content_start, 46, 46, 46)) {
+            *output = YamlLine {
+                kind: YamlLineKind::DocumentEnd,
+                scalar_kind: YamlScalarKind::Empty,
+                indent: indent,
+                line_number: reader.line_number,
+                key: BytesView {
+                    data: 0,
+                    length: 0
+                },
+                value: BytesView {
+                    data: 0,
+                    length: 0
+                },
+                has_value: false,
+            };
+            return YamlError::None;
+        }
+        bool sequence =
+            load(reader.source.data + content_start) == 45 &&
+            (content_start + 1 == content_end || whitespace(load(reader.source.data + content_start + 1)));
+        i64 value_start = content_start;
+
+        if (sequence) {
+            value_start = trim_start(reader.source.data, content_start + 1, content_end);
+        }
+
+        i64 colon = mapping_colon(reader.source.data, value_start, content_end);
+
+        if (colon >= 0) {
+            i64 key_end = trim_end(reader.source.data, value_start, colon);
+
+            if (key_end == value_start) {
+                return YamlError::EmptyKey;
+            }
+
+            BytesView value = line_value(reader.source.data, colon + 1, content_end);
+            YamlError value_error = validate_scalar(value);
+
+            if (value_error != YamlError::None) {
+                return value_error;
+            }
+
+            YamlLineKind line_kind = YamlLineKind::Mapping;
+
+            if (sequence) {
+                line_kind = YamlLineKind::SequenceMapping;
+            }
+            *output = YamlLine {
+                kind: line_kind,
+                scalar_kind: scalar_kind(value),
+                indent: indent,
+                line_number: reader.line_number,
+                key: BytesView {
+                    data: reader.source.data + value_start,
+                    length: key_end - value_start
+                },
+                value: value,
+                has_value: value.length > 0,
+            };
+            return YamlError::None;
+        }
+
+        BytesView value = line_value(reader.source.data, value_start, content_end);
+        YamlError value_error = validate_scalar(value);
+
+        if (value_error != YamlError::None) {
+            return value_error;
+        }
+
+        YamlLineKind line_kind = YamlLineKind::Scalar;
+
+        if (sequence) {
+            line_kind = YamlLineKind::Sequence;
+        }
+        *output = YamlLine {
+            kind: line_kind,
+            scalar_kind: scalar_kind(value),
+            indent: indent,
+            line_number: reader.line_number,
+            key: BytesView {
+                data: 0,
+                length: 0
+            },
+            value: value,
+            has_value: value.length > 0,
+        };
+        return YamlError::None;
+    }
+    return YamlError::End;
+}
+
+public fn decode_scalar(BytesView value, usize output, i64 capacity, i64&mut written) -> YamlError {
+    *written = 0;
+    if (value.length < 0 || (value.length > 0 && value.data == 0)) {
+        return YamlError::InvalidInput;
+    }
+    if (value.length < 2 || (load(value.data) != 34 && load(value.data) != 39)) {
+        if (value.length > capacity || (value.length > 0 && output == 0)) {
+            return YamlError::OutputFull;
+        }
+
+        i64 i = 0;
+
+        while (i < value.length) {
+            store(output + i, load(value.data + i));
+            i += 1;
+        }
+        *written = value.length;
+        return YamlError::None;
+    }
+
+    i64 quote = load(value.data);
+
+    if (load(value.data + value.length - 1) != quote) {
+        return YamlError::UnterminatedQuote;
+    }
+
+    i64 source = 1;
+    i64 destination = 0;
+
+    while (source < value.length - 1) {
+        i64 byte = load(value.data + source);
+
+        if (
+            quote == 39 &&
+            byte == 39 &&
+            source + 1 < value.length - 1 &&
+            load(value.data + source + 1) == 39
+        ) {
+            source += 1;
+        } else if (quote == 34 && byte == 92) {
+            source += 1;
+            if (source >= value.length - 1) {
+                return YamlError::UnterminatedQuote;
+            }
+            byte = load(value.data + source);
+            if (byte == 110) {
+                byte = 10;
+            } else if (byte == 114) {
+                byte = 13;
+            } else if (byte == 116) {
+                byte = 9;
+            } else if (byte != 34 && byte != 92 && byte != 47) {
+                return YamlError::UnsupportedEscape;
+            }
+        }
+        if (destination >= capacity || output == 0) {
+            return YamlError::OutputFull;
+        }
+        store(output + destination, byte);
+        destination += 1;
+        source += 1;
+    }
+    *written = destination;
+    return YamlError::None;
+}
+
+public fn integer(BytesView value, i64&mut output) -> YamlError {
+    if (scalar_kind(value) != YamlScalarKind::Integer) {
+        return YamlError::InvalidInteger;
+    }
+
+    i64 cursor = 0;
+    bool negative = false;
+
+    if (load(value.data) == 43 || load(value.data) == 45) {
+        negative = load(value.data) == 45;
+        cursor = 1;
+    }
+
+    u64 magnitude = 0;
+    u64 limit = 9223372036854775807;
+
+    if (negative) {
+        limit = 9223372036854775808;
+    }
+    while (cursor < value.length) {
+        u64 digit = (load(value.data + cursor) - 48)as u64;
+
+        if (magnitude > (limit - digit) / 10) {
+            return YamlError::IntegerOverflow;
+        }
+        magnitude = magnitude * 10 + digit;
+        cursor += 1;
+    }
+    if (negative) {
+        if (magnitude == 9223372036854775808) {
+            *output = -9223372036854775807 - 1;
+        } else {
+            *output = -(magnitude as i64);
+        }
+    } else {
+        *output = magnitude as i64;
+    }
+    return YamlError::None;
+}

@@ -1,0 +1,48 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import core::bytes;
+import yaml::error;
+import yaml::reader;
+import yaml::value;
+
+fn main() -> i64 {
+    u8 tabbed[5] = [9, 120, 58, 32, 49];
+    YamlReader reader = yaml::reader::create(&tabbed[0]as usize, 5, 16);
+    YamlLine line;
+
+    if (yaml::reader::next(&mut reader, &mut line) != YamlError::TabIndentation) {
+        return 1;
+    }
+
+    u8 anchor[5] = [120, 58, 32, 38, 97];
+
+    reader = yaml::reader::create(&anchor[0]as usize, 5, 16);
+    if (yaml::reader::next(&mut reader, &mut line) != YamlError::UnsupportedFeature) {
+        return 2;
+    }
+
+    u8 maximum[19] = [57, 50, 50, 51, 51, 55, 50, 48, 51, 54, 56, 53, 52, 55, 55, 53, 56, 48, 55];
+
+    BytesView value = BytesView {
+        data:&maximum[0]as usize,
+        length: 19
+    };
+
+    i64 integer = 0;
+
+    if (yaml::reader::integer(value, &mut integer) != YamlError::None || integer != 9223372036854775807) {
+        return 3;
+    }
+
+    u8 overflow[19] = [57, 50, 50, 51, 51, 55, 50, 48, 51, 54, 56, 53, 52, 55, 55, 53, 56, 48, 56];
+
+    value = BytesView {
+        data:&overflow[0]as usize,
+        length: 19
+    };
+    if (yaml::reader::integer(value, &mut integer) != YamlError::IntegerOverflow) {
+        return 4;
+    }
+    return 0;
+}

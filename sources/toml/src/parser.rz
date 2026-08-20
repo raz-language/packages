@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace toml::parser;
+
 import alloc::string;
 import alloc::vec;
 public import toml::document;
@@ -360,8 +361,8 @@ fn classify_number(usize data, i64 start, i64 end, TomlValueKind&mut kind) -> bo
     if (cursor >= end) {
         return false;
     }
-    // Special floating-point values.
 
+    // Special floating-point values.
     i64 inf[3] = [105, 110, 102];
     i64 nan[3] = [110, 97, 110];
 
@@ -372,6 +373,7 @@ fn classify_number(usize data, i64 start, i64 end, TomlValueKind&mut kind) -> bo
         *kind = TomlValueKind::Float;
         return true;
     }
+
     // Non-decimal integers use TOML's 0x / 0o / 0b prefixes.
     if (cursor + 2 <= end && byte_at(data, cursor) == 48) {
         i64 marker = byte_at(data, cursor + 1);
@@ -419,7 +421,11 @@ fn classify_number(usize data, i64 start, i64 end, TomlValueKind&mut kind) -> bo
     if (cursor != end) {
         return false;
     }
-    *kind = floating?TomlValueKind::Float: TomlValueKind::Integer;
+    if (floating) {
+        *kind = TomlValueKind::Float;
+    } else {
+        *kind = TomlValueKind::Integer;
+    }
     return true;
 }
 
@@ -439,8 +445,8 @@ fn classify_scalar(usize data, i64 start, i64 end, TomlValueKind&mut kind) -> bo
         *kind = TomlValueKind::String;
         return true;
     }
-    // TOML booleans are intentionally case-sensitive.
 
+    // TOML booleans are intentionally case-sensitive.
     i64 true_bytes[4] = [116, 114, 117, 101];
     i64 false_bytes[5] = [102, 97, 108, 115, 101];
 
@@ -521,7 +527,12 @@ fn parse_value_span(
 fn parse_table(usize data, i64 length, i64&mut cursor, RawVec&mut nodes) -> TomlError {
     i64 start = *cursor;
     bool array_table = start + 1 < length && byte_at(data, start + 1) == 91;
-    i64 open_count = array_table?2: 1;
+    i64 open_count = 1;
+
+    if (array_table) {
+        open_count = 2;
+    }
+
     i64 close_count = open_count;
     i64 key_start = start + open_count;
     i64 scan = key_start;
@@ -571,10 +582,14 @@ fn parse_table(usize data, i64 length, i64&mut cursor, RawVec&mut nodes) -> Toml
 
     i64 line = 1;
     i64 column = 1;
+    TomlNodeKind node_kind = TomlNodeKind::Table;
 
+    if (array_table) {
+        node_kind = TomlNodeKind::ArrayTable;
+    }
     location_for(data, start, &mut line, &mut column);
     if (!append_node(nodes, TomlNode {
-        kind: array_table?TomlNodeKind::ArrayTable: TomlNodeKind::Table,
+        kind: node_kind,
         value_kind: TomlValueKind::String,
         key_offset: key_start,
         key_length: key_end - key_start,
@@ -717,18 +732,19 @@ fn parse_into(usize data, i64 length, i64 max_depth, RawVec&mut nodes) -> TomlEr
 /// outlive the document.
 public fn parse_borrowed(usize data, i64 length, i64 max_depth, TomlDocument&mut output) -> TomlError {
     TomlDocument document = empty();
+    RawVec nodes = alloc::vec::create_aligned(size_of<TomlNode>()as i64, align_of<TomlNode>()as i64, 0, );
 
     document.borrowed_source = data;
     document.borrowed_length = length;
     document.borrowed = true;
 
-    TomlError result = parse_into(data, length, max_depth, &mut document.nodes);
+    TomlError result = parse_into(data, length, max_depth, &mut nodes);
 
     if (!success(&result)) {
-        destroy(&mut document);
         return result;
     }
-    destroy(output);
+    document.nodes = move nodes;
+    toml::document::destroy(output);
     *output = move document;
     return result;
 }
@@ -736,6 +752,7 @@ public fn parse_borrowed(usize data, i64 length, i64 max_depth, TomlDocument&mut
 /// Parse TOML into a document that owns its source bytes.
 public fn parse_owned(String source, i64 max_depth, TomlDocument&mut output) -> TomlError {
     TomlDocument document = empty();
+    RawVec nodes = alloc::vec::create_aligned(size_of<TomlNode>()as i64, align_of<TomlNode>()as i64, 0, );
 
     document.source = move source;
     document.borrowed = false;
@@ -743,13 +760,13 @@ public fn parse_owned(String source, i64 max_depth, TomlDocument&mut output) -> 
         alloc::string::data_ptr(&document.source),
         alloc::string::len(&document.source),
         max_depth,
-        &mut document.nodes,
+        &mut nodes,
     );
     if (!success(&result)) {
-        destroy(&mut document);
         return result;
     }
-    destroy(output);
+    document.nodes = move nodes;
+    toml::document::destroy(output);
     *output = move document;
     return result;
 }

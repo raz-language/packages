@@ -1,0 +1,50 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import csv::reader;
+import csv::writer;
+
+fn main() -> i64 {
+    u8 output[128];
+    u8 first[4] = [110, 97, 109, 101];
+    u8 second[7] = [114, 97, 122, 44, 108, 97, 110];
+    CsvWriter writer = csv::writer::create(&mut output[0]as usize, 128, 44);
+
+    if (csv::writer::field(&mut writer, &first[0]as usize, 4) != CsvWriteError::None) {
+        return 1;
+    }
+    if (csv::writer::field(&mut writer, &second[0]as usize, 7) != CsvWriteError::None) {
+        return 2;
+    }
+    if (csv::writer::end_record(&mut writer) != CsvWriteError::None) {
+        return 3;
+    }
+
+    CsvReader reader = csv::reader::create(&output[0]as usize, csv::writer::written(&writer), 44);
+    CsvField field;
+
+    if (csv::reader::next(&mut reader, &mut field) != CsvError::None || field.quoted || field.end_of_record) {
+        return 4;
+    }
+    if (
+        csv::reader::next(&mut reader, &mut field) != CsvError::None ||
+        !field.quoted ||
+        !field.end_of_record
+    ) {
+        return 5;
+    }
+
+    u8 decoded[16];
+    i64 written = 0;
+
+    if (
+        csv::reader::decode(&field, &mut decoded[0]as usize, 16, &mut written) != CsvError::None ||
+        written != 7
+    ) {
+        return 6;
+    }
+    if (csv::reader::next(&mut reader, &mut field) != CsvError::End) {
+        return 7;
+    }
+    return 0;
+}

@@ -1,0 +1,113 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import encoding::hex;
+import encoding::base64url;
+import encoding::base32;
+import encoding::checksum;
+
+fn bytes_equal(usize left, usize right, i64 length) -> bool {
+    i64 i = 0;
+
+    while (i < length) {
+        unsafe {
+            if (*((left + i)as u8*const) != *((right + i)as u8*const)) {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn main() -> i64 {
+    u8 input[6] = [102, 111, 111, 98, 97, 114];
+    u8 encoded[32];
+    u8 decoded[16];
+    i64 written = 0;
+
+    if (
+        encoding::hex::encode(
+            &input[0]as usize,
+            6,
+            &mut encoded[0]as usize,
+            32,
+            false,
+            &mut written
+        ) != HexError::None ||
+        written != 12
+    ) {
+        return 1;
+    }
+    if (
+        encoding::hex::decode(
+            &encoded[0]as usize,
+            written,
+            &mut decoded[0]as usize,
+            16,
+            &mut written
+        ) != HexError::None ||
+        written != 6 ||
+        !bytes_equal(&input[0]as usize, &decoded[0]as usize, 6)
+    ) {
+        return 2;
+    }
+    if (
+        encoding::base64url::encode(
+            &input[0]as usize,
+            6,
+            &mut encoded[0]as usize,
+            32,
+            &mut written
+        ) != Base64UrlError::None ||
+        written != 8
+    ) {
+        return 3;
+    }
+    if (
+        encoding::base64url::decode(
+            &encoded[0]as usize,
+            written,
+            &mut decoded[0]as usize,
+            16,
+            &mut written
+        ) != Base64UrlError::None ||
+        written != 6 ||
+        !bytes_equal(&input[0]as usize, &decoded[0]as usize, 6)
+    ) {
+        return 4;
+    }
+    if (
+        encoding::base32::encode(
+            &input[0]as usize,
+            6,
+            &mut encoded[0]as usize,
+            32,
+            false,
+            &mut written
+        ) != Base32Error::None ||
+        written != 10
+    ) {
+        return 5;
+    }
+    if (
+        encoding::base32::decode(
+            &encoded[0]as usize,
+            written,
+            &mut decoded[0]as usize,
+            16,
+            &mut written
+        ) != Base32Error::None ||
+        written != 6 ||
+        !bytes_equal(&input[0]as usize, &decoded[0]as usize, 6)
+    ) {
+        return 6;
+    }
+
+    u8 crc_text[9] = [49, 50, 51, 52, 53, 54, 55, 56, 57];
+
+    if (encoding::checksum::crc32(&crc_text[0]as usize, 9) != (0xcbf43926 as u32)) {
+        return 7;
+    }
+    return 0;
+}

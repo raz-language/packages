@@ -1,0 +1,16 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import csv::reader;
+
+fn main() -> i64 {
+    u8 source[8] = [110, 97, 109, 101, 44, 105, 100, 10];
+    CsvReader reader = csv::reader::create(&source[0]as usize, 8, 44);
+    CsvField field;
+    i64 count = 0;
+
+    while (csv::reader::next(&mut reader, &mut field) == CsvError::None) {
+        count += 1;
+    }
+    return count == 2?0: 1;
+}

@@ -1,0 +1,20 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace yaml::error;
+
+public enum YamlError {
+    None,
+    End,
+    InvalidInput,
+    InvalidLineEnding,
+    TabIndentation,
+    IndentExceeded,
+    EmptyKey,
+    UnterminatedQuote,
+    UnsupportedFeature,
+    UnsupportedEscape,
+    InvalidInteger,
+    IntegerOverflow,
+    OutputFull,
+}

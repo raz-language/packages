@@ -1,0 +1,21 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import cbor::error;
+import cbor::writer;
+
+fn main() -> i64 {
+    u8 output[32];
+    CborWriter writer = cbor::writer::create(&mut output[0]as usize, 32);
+
+    if (cbor::writer::map(&mut writer, 1) != CborError::None) {
+        return 1;
+    }
+    if (cbor::writer::unsigned(&mut writer, 1) != CborError::None) {
+        return 2;
+    }
+    if (cbor::writer::boolean(&mut writer, true) != CborError::None) {
+        return 3;
+    }
+    return 0;
+}

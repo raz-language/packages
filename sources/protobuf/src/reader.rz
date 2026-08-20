@@ -1,0 +1,191 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace protobuf::reader;
+
+import core::bytes;
+import protobuf::error;
+import protobuf::wire;
+
+public struct ProtobufReader {
+    BytesView source;
+    i64 cursor;
+}
+
+fn load(usize address) -> u64 {
+    unsafe {
+        return (*((address)as u8*const))as u64;
+    }
+}
+
+public fn create(usize data, i64 length) -> ProtobufReader {
+    return ProtobufReader {
+        source: BytesView {
+            data: data,
+            length: length
+        },
+        cursor: 0,
+    };
+}
+
+public fn position(ProtobufReader& reader) -> i64 {
+    return reader.cursor;
+}
+
+fn remaining(ProtobufReader& reader) -> i64 {
+    if (reader.cursor < 0 || reader.cursor > reader.source.length) {
+        return 0;
+    }
+    return reader.source.length - reader.cursor;
+}
+
+fn read_varint(ProtobufReader&mut reader, u64&mut output) -> ProtobufError {
+    u64 value = 0;
+    i64 shift = 0;
+    i64 count = 0;
+
+    while (count < 10) {
+        if (remaining(reader) <= 0) {
+            return ProtobufError::UnexpectedEnd;
+        }
+
+        u64 byte = load(reader.source.data + reader.cursor);
+
+        reader.cursor += 1;
+        if (count == 9 && (byte & 254) != 0) {
+            return ProtobufError::InvalidVarint;
+        }
+        value |= (byte & 127) << shift;
+        if ((byte & 128) == 0) {
+            *output = value;
+            return ProtobufError::None;
+        }
+        shift += 7;
+        count += 1;
+    }
+    return ProtobufError::InvalidVarint;
+}
+
+fn read_fixed(ProtobufReader&mut reader, i64 width, u64&mut output) -> ProtobufError {
+    if (width > remaining(reader)) {
+        return ProtobufError::UnexpectedEnd;
+    }
+
+    u64 value = 0;
+    i64 i = 0;
+
+    while (i < width) {
+        value |= load(reader.source.data + reader.cursor + i) << (i * 8);
+        i += 1;
+    }
+    reader.cursor += width;
+    *output = value;
+    return ProtobufError::None;
+}
+
+public fn next(ProtobufReader&mut reader, Field&mut output) -> ProtobufError {
+    if (
+        reader.source.length < 0 ||
+        (reader.source.length > 0 && reader.source.data == 0) ||
+        reader.cursor < 0 ||
+        reader.cursor > reader.source.length
+    ) {
+        return ProtobufError::InvalidInput;
+    }
+    if (reader.cursor == reader.source.length) {
+        return ProtobufError::End;
+    }
+
+    i64 start = reader.cursor;
+    u64 key = 0;
+    ProtobufError error = read_varint(reader, &mut key);
+
+    if (error != ProtobufError::None) {
+        reader.cursor = start;
+        return error;
+    }
+
+    u64 raw_number = key >> 3;
+    i64 raw_wire = (key & 7)as i64;
+
+    if (raw_number == 0 || raw_number > 536870911) {
+        reader.cursor = start;
+        return ProtobufError::InvalidFieldNumber;
+    }
+
+    WireType wire_type = WireType::Varint;
+    u64 varint_value = 0;
+    u64 fixed64_value = 0;
+    u32 fixed32_value = 0;
+
+    BytesView payload = BytesView {
+        data: 0,
+        length: 0
+    };
+    if (raw_wire == 0) {
+        error = read_varint(reader, &mut varint_value);
+    } else if (raw_wire == 1) {
+        wire_type = WireType::Fixed64;
+        error = read_fixed(reader, 8, &mut fixed64_value);
+    } else if (raw_wire == 2) {
+        wire_type = WireType::LengthDelimited;
+
+        u64 length = 0;
+
+        error = read_varint(reader, &mut length);
+        if (error == ProtobufError::None) {
+            if (length > 9223372036854775807) {
+                error = ProtobufError::LengthOverflow;
+            } else if ((length as i64) > remaining(reader)) {
+                error = ProtobufError::UnexpectedEnd;
+            } else {
+                payload = BytesView {
+                    data: reader.source.data + reader.cursor,
+                    length: length as i64
+                };
+                reader.cursor += length as i64;
+            }
+        }
+    } else if (raw_wire == 3 || raw_wire == 4) {
+        reader.cursor = start;
+        return ProtobufError::GroupsUnsupported;
+    } else if (raw_wire == 5) {
+        wire_type = WireType::Fixed32;
+
+        u64 value = 0;
+
+        error = read_fixed(reader, 4, &mut value);
+        fixed32_value = value as u32;
+    } else {
+        reader.cursor = start;
+        return ProtobufError::InvalidWireType;
+    }
+    if (error != ProtobufError::None) {
+        reader.cursor = start;
+        return error;
+    }
+    *output = Field {
+        number: raw_number as i64,
+        wire_type: wire_type,
+        varint_value: varint_value,
+        fixed64_value: fixed64_value,
+        fixed32_value: fixed32_value,
+        payload: payload,
+        offset: start,
+    };
+    return ProtobufError::None;
+}
+
+public fn sint64(Field& field, i64&mut output) -> ProtobufError {
+    if (field.wire_type != WireType::Varint) {
+        return ProtobufError::TypeMismatch;
+    }
+
+    i64 decoded = (field.varint_value >> 1)as i64;
+
+    if ((field.varint_value & 1) != 0) {
+        decoded = -decoded - 1;
+    }
+    *output = decoded;
+    return ProtobufError::None;
+}

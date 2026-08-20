@@ -1,0 +1,353 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace archive::tar;
+
+import archive::path;
+import core::bytes;
+
+public enum TarError {
+    None,
+    End,
+    InvalidInput,
+    Truncated,
+    InvalidHeader,
+    InvalidChecksum,
+    InvalidNumber,
+    UnsafePath,
+    OutputFull,
+}
+
+public enum TarEntryKind {
+    File,
+    Directory,
+    Link,
+    Other,
+}
+
+public struct TarEntry {
+    BytesView name;
+    BytesView prefix;
+    BytesView data;
+    i64 size;
+    i64 mode;
+    i64 modified;
+    TarEntryKind kind;
+    i64 type_flag;
+}
+
+public struct TarReader {
+    BytesView source;
+    i64 cursor;
+    bool done;
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn store(usize address, i64 value) {
+    unsafe {
+        *((address)as u8*mut) = value as u8;
+    }
+}
+
+fn zero(usize output, i64 length) {
+    i64 i = 0;
+
+    while (i < length) {
+        store(output + i, 0);
+        i += 1;
+    }
+}
+
+fn copy(usize output, usize input, i64 length) {
+    i64 i = 0;
+
+    while (i < length) {
+        store(output + i, load(input + i));
+        i += 1;
+    }
+}
+
+fn field_length(usize data, i64 width) -> i64 {
+    i64 i = 0;
+
+    while (i < width && load(data + i) != 0) {
+        i += 1;
+    }
+    return i;
+}
+
+fn all_zero(usize data, i64 length) -> bool {
+    i64 i = 0;
+
+    while (i < length) {
+        if (load(data + i) != 0) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn parse_octal(usize data, i64 width, i64&mut output) -> bool {
+    i64 i = 0;
+
+    while (i < width && (load(data + i) == 0 || load(data + i) == 32)) {
+        i += 1;
+    }
+
+    i64 value = 0;
+    bool any = false;
+
+    while (i < width) {
+        i64 byte = load(data + i);
+
+        if (byte == 0 || byte == 32) {
+            break;
+        }
+        if (byte < 48 || byte > 55) {
+            return false;
+        }
+
+        i64 digit = byte - 48;
+
+        if (value > 1152921504606846975) {
+            return false;
+        }
+        value = value * 8 + digit;
+        any = true;
+        i += 1;
+    }
+    *output = value;
+    return any || width > 0;
+}
+
+fn header_sum(usize header) -> i64 {
+    i64 sum = 0;
+    i64 i = 0;
+
+    while (i < 512) {
+        if (i >= 148 && i < 156) {
+            sum += 32;
+        } else {
+            sum += load(header + i);
+        }
+        i += 1;
+    }
+    return sum;
+}
+
+fn round_block(i64 size) -> i64 {
+    if (size < 0 || size > 9223372036854775295) {
+        return -1;
+    }
+    return ((size + 511) / 512) * 512;
+}
+
+public fn reader(usize data, i64 length) -> TarReader {
+    return TarReader {
+        source: BytesView {
+            data: data,
+            length: length
+        },
+        cursor: 0,
+        done: length == 0,
+    };
+}
+
+public fn next(TarReader&mut reader, TarEntry&mut output) -> TarError {
+    if (reader.source.length < 0 || (reader.source.length > 0 && reader.source.data == 0)) {
+        return TarError::InvalidInput;
+    }
+    if (reader.done) {
+        return TarError::End;
+    }
+    if (reader.cursor > reader.source.length - 512) {
+        return TarError::Truncated;
+    }
+
+    usize header = reader.source.data + reader.cursor;
+
+    if (all_zero(header, 512)) {
+        reader.done = true;
+        return TarError::End;
+    }
+
+    i64 expected = 0;
+
+    if (!parse_octal(header + 148, 8, &mut expected)) {
+        return TarError::InvalidNumber;
+    }
+    if (header_sum(header) != expected) {
+        return TarError::InvalidChecksum;
+    }
+
+    i64 name_length = field_length(header, 100);
+    i64 prefix_length = field_length(header + 345, 155);
+
+    if (!archive::path::safe(header, name_length)) {
+        return TarError::UnsafePath;
+    }
+    if (prefix_length > 0 && !archive::path::safe(header + 345, prefix_length)) {
+        return TarError::UnsafePath;
+    }
+
+    i64 mode = 0;
+    i64 size = 0;
+    i64 modified = 0;
+
+    if (
+        !parse_octal(header + 100, 8, &mut mode) ||
+        !parse_octal(header + 124, 12, &mut size) ||
+        !parse_octal(header + 136, 12, &mut modified)
+    ) {
+        return TarError::InvalidNumber;
+    }
+
+    i64 padded = round_block(size);
+
+    if (padded < 0 || reader.cursor + 512 > reader.source.length - padded) {
+        return TarError::Truncated;
+    }
+
+    i64 type_flag = load(header + 156);
+    TarEntryKind kind = TarEntryKind::Other;
+
+    if (type_flag == 0 || type_flag == 48) {
+        kind = TarEntryKind::File;
+    } else if (type_flag == 53) {
+        kind = TarEntryKind::Directory;
+    } else if (type_flag == 49 || type_flag == 50) {
+        kind = TarEntryKind::Link;
+    }
+    *output = TarEntry {
+        name: BytesView {
+            data: header,
+            length: name_length
+        },
+        prefix: BytesView {
+            data: header + 345,
+            length: prefix_length
+        },
+        data: BytesView {
+            data: header + 512,
+            length: size
+        },
+        size: size,
+        mode: mode,
+        modified: modified,
+        kind: kind,
+        type_flag: type_flag,
+    };
+    reader.cursor += 512 + padded;
+    return TarError::None;
+}
+
+fn write_octal(usize output, i64 width, i64 value) -> bool {
+    if (value < 0 || width < 2) {
+        return false;
+    }
+
+    i64 i = 0;
+
+    while (i < width - 1) {
+        store(output + i, 48);
+        i += 1;
+    }
+    store(output + width - 1, 0);
+    i = width - 2;
+    while (value > 0 && i >= 0) {
+        store(output + i, 48 + (value & 7));
+        value = value >> 3;
+        i -= 1;
+    }
+    return value == 0;
+}
+
+/// Writes one USTAR file/directory record into caller-owned storage.
+public fn write_entry(
+    usize output,
+    i64 capacity,
+    usize name,
+    i64 name_length,
+    usize data,
+    i64 size,
+    i64 mode,
+    i64 modified,
+    TarEntryKind kind,
+    i64&mut written,
+) -> TarError {
+    *written = 0;
+    if (!archive::path::safe(name, name_length) || name_length > 100 || size < 0 || (size > 0 && data == 0)) {
+        return TarError::InvalidInput;
+    }
+
+    i64 padded = round_block(size);
+
+    if (padded < 0) {
+        return TarError::InvalidNumber;
+    }
+
+    i64 required = 512 + padded;
+
+    if (capacity < required || output == 0) {
+        return TarError::OutputFull;
+    }
+    zero(output, required);
+    copy(output, name, name_length);
+    if (
+        !write_octal(output + 100, 8, mode) ||
+        !write_octal(output + 108, 8, 0) ||
+        !write_octal(output + 116, 8, 0) ||
+        !write_octal(output + 124, 12, size) ||
+        !write_octal(output + 136, 12, modified)
+    ) {
+        return TarError::InvalidNumber;
+    }
+
+    i64 i = 148;
+
+    while (i < 156) {
+        store(output + i, 32);
+        i += 1;
+    }
+
+    i64 type_flag = 48;
+
+    if (kind == TarEntryKind::Directory) {
+        type_flag = 53;
+    }
+    store(output + 156, type_flag);
+
+    i64 magic[8] = [117, 115, 116, 97, 114, 0, 48, 48];
+
+    i = 0;
+    while (i < 8) {
+        store(output + 257 + i, magic[i]);
+        i += 1;
+    }
+
+    i64 sum = header_sum(output);
+
+    if (!write_octal(output + 148, 7, sum)) {
+        return TarError::InvalidNumber;
+    }
+    store(output + 155, 32);
+    if (size > 0) {
+        copy(output + 512, data, size);
+    }
+    *written = required;
+    return TarError::None;
+}
+
+public fn write_end(usize output, i64 capacity) -> TarError {
+    if (capacity < 1024 || output == 0) {
+        return TarError::OutputFull;
+    }
+    zero(output, 1024);
+    return TarError::None;
+}

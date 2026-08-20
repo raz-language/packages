@@ -29,6 +29,17 @@ The editable source for the official packages is kept in [`sources/`](sources/).
 
 This keeps the repository useful both as the canonical GitHub-backed registry and as the home of the official package implementations.
 
+## Source verification
+
+Run the production compiler across every current official package with:
+
+```text
+RAZ_COMPILER=/path/to/raz ./scripts/compile-all.sh --clean
+```
+
+The command performs a clean parse, type, ownership, and MIR validation pass for
+each package and exits nonzero if any package fails.
+
 ## Static registry API
 
 GitHub itself serves the official registry API. The generated endpoints are normal versioned repository files:

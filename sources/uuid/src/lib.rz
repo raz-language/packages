@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace uuid;
+
 import crypto::secure;
 import std::time;
+
 /// Compact 128-bit UUID value stored in RFC 9562/network byte order.
 /// `high` contains bytes 0..7 and `low` contains bytes 8..15.
 public struct Uuid {

@@ -1,0 +1,133 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace testing::random;
+
+public struct TestRng {
+    u64 state;
+}
+
+fn words(u64 a, u64 b, u64 c, u64 d) -> u64 {
+    return (a << 48) | (b << 32) | (c << 16) | d;
+}
+
+public fn create(u64 seed) -> TestRng {
+    if (seed == 0) {
+        seed = words(40503 as u64, 31161 as u64, 32586 as u64, 31765 as u64);
+    }
+    return TestRng {
+        state: seed
+    };
+}
+
+/// SplitMix64: small, deterministic, full-period state progression suitable
+/// for reproducible generators (not cryptographic randomness).
+public fn next_u64(TestRng&mut rng) -> u64 {
+    rng.state += words(40503 as u64, 31161 as u64, 32586 as u64, 31765 as u64);
+
+    u64 value = rng.state;
+
+    value = (value ^ (value >> 30)) * words(48984 as u64, 18285 as u64, 7396 as u64, 58809 as u64);
+    value = (value ^ (value >> 27)) * words(38096 as u64, 18875 as u64, 4913 as u64, 4587 as u64);
+    return value ^ (value >> 31);
+}
+
+public fn next_bool(TestRng&mut rng) -> bool {
+    return (next_u64(rng) & 1) != 0;
+}
+
+public fn range_u64(TestRng&mut rng, u64 minimum, u64 maximum, u64&mut output) -> bool {
+    if (minimum > maximum) {
+        return false;
+    }
+
+    u64 span = maximum - minimum + 1;
+
+    if (span == 0) {
+        *output = next_u64(rng);
+        return true;
+    }
+
+    u64 threshold = (0 as u64 - span) % span;
+    u64 value = next_u64(rng);
+
+    while (value < threshold) {
+        value = next_u64(rng);
+    }
+    *output = minimum + value % span;
+    return true;
+}
+
+public fn range_i64(TestRng&mut rng, i64 minimum, i64 maximum, i64&mut output) -> bool {
+    if (minimum > maximum) {
+        return false;
+    }
+
+    u64 sign = (1 as u64) << 63;
+    u64 ordered_min = (minimum as u64) ^ sign;
+    u64 ordered_max = (maximum as u64) ^ sign;
+    u64 selected = 0;
+
+    if (!range_u64(rng, ordered_min, ordered_max, &mut selected)) {
+        return false;
+    }
+    *output = (selected ^ sign)as i64;
+    return true;
+}
+
+public fn fill(TestRng&mut rng, usize output, i64 length) -> bool {
+    if (length < 0 || (length > 0 && output == 0)) {
+        return false;
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        u64 value = next_u64(rng);
+        i64 take = 8;
+
+        if (take > length - i) {
+            take = length - i;
+        }
+
+        i64 j = 0;
+
+        while (j < take) {
+            unsafe {
+                *((output + i + j)as u8*mut) = (value >> (j * 8))as u8;
+            }
+            j += 1;
+        }
+        i += take;
+    }
+    return true;
+}
+
+public fn shuffle(TestRng&mut rng, usize data, i64 length, i64 element_size) -> bool {
+    if (length < 0 || element_size <= 0 || (length > 0 && data == 0)) {
+        return false;
+    }
+
+    i64 i = length - 1;
+
+    while (i > 0) {
+        u64 selected = 0;
+
+        range_u64(rng, 0, i as u64, &mut selected);
+
+        i64 j = selected as i64;
+        i64 byte = 0;
+
+        while (byte < element_size) {
+            unsafe {
+                u8 temporary = *((data + i * element_size + byte)as u8*const);
+
+                *((data + i * element_size + byte)as u8*mut) = *((data + j * element_size + byte)as u8*const);
+                *((data + j * element_size + byte)as u8*mut) = temporary;
+            }
+            byte += 1;
+        }
+        i -= 1;
+    }
+    return true;
+}

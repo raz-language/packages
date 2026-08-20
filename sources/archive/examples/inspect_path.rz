@@ -1,0 +1,13 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import archive::path;
+
+fn main() -> i64 {
+    u8 entry[15] = [97, 115, 115, 101, 116, 115, 47, 105, 99, 111, 110, 46, 112, 110, 103];
+
+    if (!archive::path::safe(&entry[0]as usize, 15)) {
+        return 1;
+    }
+    return 0;
+}

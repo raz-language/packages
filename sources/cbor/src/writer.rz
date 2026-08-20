@@ -1,0 +1,222 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace cbor::writer;
+
+import cbor::error;
+
+public struct CborWriter {
+    usize output;
+    i64 capacity;
+    i64 length;
+    CborError error;
+}
+
+fn store(usize address, u64 value) {
+    unsafe {
+        *((address)as u8*mut) = value as u8;
+    }
+}
+
+fn load(usize address) -> u64 {
+    unsafe {
+        return (*((address)as u8*const))as u64;
+    }
+}
+
+public fn create(usize output, i64 capacity) -> CborWriter {
+    CborError error = CborError::None;
+
+    if (capacity < 0 || (capacity > 0 && output == 0)) {
+        error = CborError::InvalidInput;
+        capacity = 0;
+    }
+    return CborWriter {
+        output: output,
+        capacity: capacity,
+        length: 0,
+        error: error,
+    };
+}
+
+public fn written(CborWriter& writer) -> i64 {
+    return writer.length;
+}
+
+public fn error(CborWriter& writer) -> CborError {
+    return writer.error;
+}
+
+fn fail(CborWriter&mut writer, CborError error) -> CborError {
+    if (writer.error == CborError::None) {
+        writer.error = error;
+    }
+    return writer.error;
+}
+
+fn header_length(u64 argument) -> i64 {
+    if (argument < 24) {
+        return 1;
+    }
+    if (argument <= 255) {
+        return 2;
+    }
+    if (argument <= 65535) {
+        return 3;
+    }
+    if (argument <= 4294967295) {
+        return 5;
+    }
+    return 9;
+}
+
+fn write_header(CborWriter&mut writer, i64 major, u64 argument) -> CborError {
+    if (writer.error != CborError::None) {
+        return writer.error;
+    }
+
+    i64 required = header_length(argument);
+
+    if (required > writer.capacity - writer.length) {
+        return fail(writer, CborError::OutputFull);
+    }
+
+    i64 info = 0;
+    i64 width = required - 1;
+
+    if (width == 0) {
+        info = argument as i64;
+    } else if (width == 1) {
+        info = 24;
+    } else if (width == 2) {
+        info = 25;
+    } else if (width == 4) {
+        info = 26;
+    } else {
+        info = 27;
+    }
+    store(writer.output + writer.length, ((major << 5) | info)as u64);
+
+    i64 i = 0;
+
+    while (i < width) {
+        i64 shift = (width - i - 1) * 8;
+
+        store(writer.output + writer.length + 1 + i, argument >> shift);
+        i += 1;
+    }
+    writer.length += required;
+    return CborError::None;
+}
+
+public fn unsigned(CborWriter&mut writer, u64 value) -> CborError {
+    return write_header(writer, 0, value);
+}
+
+public fn negative(CborWriter&mut writer, i64 value) -> CborError {
+    if (value >= 0) {
+        return fail(writer, CborError::TypeMismatch);
+    }
+    return write_header(writer, 1, (-(value + 1))as u64);
+}
+
+fn string_value(CborWriter&mut writer, i64 major, usize data, i64 length) -> CborError {
+    if (length < 0 || (length > 0 && data == 0)) {
+        return fail(writer, CborError::InvalidInput);
+    }
+
+    i64 header = header_length(length as u64);
+
+    if (header > writer.capacity - writer.length || length > writer.capacity - writer.length - header) {
+        return fail(writer, CborError::OutputFull);
+    }
+
+    CborError encoded = write_header(writer, major, length as u64);
+
+    if (encoded != CborError::None) {
+        return encoded;
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        store(writer.output + writer.length + i, load(data + i));
+        i += 1;
+    }
+    writer.length += length;
+    return CborError::None;
+}
+
+public fn bytes(CborWriter&mut writer, usize data, i64 length) -> CborError {
+    return string_value(writer, 2, data, length);
+}
+
+public fn text(CborWriter&mut writer, usize data, i64 length) -> CborError {
+    return string_value(writer, 3, data, length);
+}
+
+public fn array(CborWriter&mut writer, u64 length) -> CborError {
+    return write_header(writer, 4, length);
+}
+
+public fn map(CborWriter&mut writer, u64 length) -> CborError {
+    return write_header(writer, 5, length);
+}
+
+public fn tag(CborWriter&mut writer, u64 value) -> CborError {
+    return write_header(writer, 6, value);
+}
+
+public fn boolean(CborWriter&mut writer, bool value) -> CborError {
+    if (value) {
+        return write_header(writer, 7, 21);
+    }
+    return write_header(writer, 7, 20);
+}
+
+public fn null_value(CborWriter&mut writer) -> CborError {
+    return write_header(writer, 7, 22);
+}
+
+public fn undefined_value(CborWriter&mut writer) -> CborError {
+    return write_header(writer, 7, 23);
+}
+
+public fn simple(CborWriter&mut writer, u8 value) -> CborError {
+    if (value >= 20 && value <= 31) {
+        return fail(writer, CborError::InvalidAdditionalInfo);
+    }
+    return write_header(writer, 7, value as u64);
+}
+
+fn float_bits(CborWriter&mut writer, i64 info, u64 bits, i64 width) -> CborError {
+    if (writer.error != CborError::None) {
+        return writer.error;
+    }
+    if (width + 1 > writer.capacity - writer.length) {
+        return fail(writer, CborError::OutputFull);
+    }
+    store(writer.output + writer.length, ((7 << 5) | info)as u64);
+    writer.length += 1;
+
+    i64 i = 0;
+
+    while (i < width) {
+        store(writer.output + writer.length + i, bits >> ((width - i - 1) * 8));
+        i += 1;
+    }
+    writer.length += width;
+    return CborError::None;
+}
+
+public fn float16_bits(CborWriter&mut writer, u16 bits) -> CborError {
+    return float_bits(writer, 25, bits as u64, 2);
+}
+
+public fn float32_bits(CborWriter&mut writer, u32 bits) -> CborError {
+    return float_bits(writer, 26, bits as u64, 4);
+}
+
+public fn float64_bits(CborWriter&mut writer, u64 bits) -> CborError {
+    return float_bits(writer, 27, bits, 8);
+}

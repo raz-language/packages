@@ -26,6 +26,13 @@ sources/
   multipart/
   archive/
   testing/
+  encoding/
+  json/
+  csv/
+  yaml/
+  cbor/
+  msgpack/
+  protobuf/
 ```
 
 From this directory, workspace-aware Raz commands can operate across the package sources.

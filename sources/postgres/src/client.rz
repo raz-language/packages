@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace postgres::client;
+
 import core::result;
 import std::net;
-import postgres::wire;
+import postgres::wire as wire;
 import postgres::auth;
+import postgres::auth as auth;
 
 public enum ClientError {
     Connect,
@@ -128,7 +130,7 @@ public fn simple_query(
 
 /// Applies connection-level protocol messages that affect client state. Row/description
 /// messages remain caller-owned and are decoded through postgres::wire.
-public fn apply(Client&mut c, wire::MessageView& message) -> Result<bool, ClientError> {
+public fn apply(Client&mut c, postgres::wire::MessageView& message) -> Result<bool, ClientError> {
     i64 tag = message.tag as i64;
 
     if (tag == 82) {
@@ -138,7 +140,7 @@ public fn apply(Client&mut c, wire::MessageView& message) -> Result<bool, Client
             c.state = State::Failed;
             return Result<bool, ClientError>::Error(ClientError::Authentication);
         }
-        if (req.unwrap().kind == auth::AuthKind::Ok) {
+        if (req.unwrap().kind == AuthKind::Ok) {
             c.state = State::Authenticating;
         }
         return Result<bool, ClientError>::Ok(true);
@@ -200,8 +202,8 @@ public fn rollback(Client&mut c, usize buffer, i64 capacity) -> Result<bool, Cli
 /// SCRAM state must be retained by the caller across SASL / Continue / Final messages.
 public fn handle_auth_tcp(
     Client&mut c,
-    auth::ScramClient&mut scram,
-    wire::MessageView& message,
+    postgres::auth::ScramClient&mut scram,
+    postgres::wire::MessageView& message,
     usize user,
     i64 user_length,
     usize password,
@@ -221,10 +223,10 @@ public fn handle_auth_tcp(
 
     auto request = parsed.unwrap();
 
-    if (request.kind == auth::AuthKind::Ok) {
+    if (request.kind == AuthKind::Ok) {
         return Result<bool, ClientError>::Ok(true);
     }
-    if (request.kind == auth::AuthKind::CleartextPassword) {
+    if (request.kind == AuthKind::CleartextPassword) {
         auto frame = wire::write_password(output, output_capacity, password, password_length);
 
         if (frame.is_error()) {
@@ -235,7 +237,7 @@ public fn handle_auth_tcp(
         }
         return Result<bool, ClientError>::Ok(false);
     }
-    if (request.kind == auth::AuthKind::Sasl) {
+    if (request.kind == AuthKind::Sasl) {
         if (!auth::supports_scram_sha256(&request)) {
             return Result<bool, ClientError>::Error(ClientError::Authentication);
         }
@@ -265,7 +267,7 @@ public fn handle_auth_tcp(
         }
         return Result<bool, ClientError>::Ok(false);
     }
-    if (request.kind == auth::AuthKind::SaslContinue) {
+    if (request.kind == AuthKind::SaslContinue) {
         u8 final_message[1024];
 
         auto final_length = auth::scram_continue(
@@ -294,7 +296,7 @@ public fn handle_auth_tcp(
         }
         return Result<bool, ClientError>::Ok(false);
     }
-    if (request.kind == auth::AuthKind::SaslFinal) {
+    if (request.kind == AuthKind::SaslFinal) {
         auto verified = auth::scram_verify_final(scram, request.data, request.length);
 
         if (verified.is_error()) {

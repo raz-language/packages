@@ -2,8 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace http_router::middleware;
+
+import core::bytes;
 import std::net::http;
 import http_router::router;
+
 /// Request-scoped routing context. All request and parameter views are borrowed
 /// from buffers owned by the caller/HTTP connection.
 public struct Context {
@@ -42,7 +45,7 @@ public fn parameter_named(Context& context, BytesView name) -> Param*const {
 /// The router does not own closures or allocate callback nodes; applications can
 /// map the ID to ordinary functions/closures in whatever representation fits
 /// their server architecture.
-public fn run(Context&mut context, fn(i64, Context&mut) -> bool dispatch) -> bool {
+public fn run(Context&mut context, fn(i64, Context&mut) -> bool middleware_dispatch) -> bool {
     if (context.stopped) {
         return false;
     }
@@ -50,12 +53,13 @@ public fn run(Context&mut context, fn(i64, Context&mut) -> bool dispatch) -> boo
         return true;
     }
 
-    bool proceed = dispatch(context.route_match.middleware_id, context);
+    i64 middleware_id = context.route_match.middleware_id;
 
-    if (!proceed) {
+    if (!middleware_dispatch(middleware_id, context)) {
         context.stopped = true;
+        return false;
     }
-    return proceed;
+    return true;
 }
 
 /// Dispatches the matched route handler after middleware has succeeded.
@@ -63,5 +67,8 @@ public fn dispatch(Context&mut context, fn(i64, Context&mut) -> i64 handler_disp
     if (context.stopped || !context.route_match.matched || context.route_match.handler_id < 0) {
         return -1;
     }
-    return handler_dispatch(context.route_match.handler_id, context);
+
+    i64 handler_id = context.route_match.handler_id;
+
+    return handler_dispatch(handler_id, context);
 }

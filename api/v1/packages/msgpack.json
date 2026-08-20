@@ -1,0 +1,22 @@
+{
+  "name": "msgpack",
+  "owners": [
+    "raz-language"
+  ],
+  "versions": [
+    {
+      "archive": "packages/msgpack/0.1.0.dpk",
+      "checksum": "73cd99166b6025c6",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/msgpack/0.1.0.dpk",
+      "metadata": {
+        "description": "An allocation-free MessagePack codec for Raz."
+      },
+      "name": "msgpack",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.1.0",
+      "yanked": false
+    }
+  ]
+}

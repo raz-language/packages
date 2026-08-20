@@ -1,0 +1,143 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace jwt::jwk;
+
+import alloc::string;
+import core::bytes;
+import encoding::base64url;
+import jwt::error;
+import std::encoding::json;
+import std::encoding::json::document;
+
+public struct OctetJwk {
+    BytesView key_id;
+    BytesView algorithm;
+    usize key;
+    i64 key_length;
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn equal(BytesView value, usize expected, i64 length) -> bool {
+    if (value.length != length) {
+        return false;
+    }
+
+    i64 i = 0;
+
+    while (i < length) {
+        if (load(value.data + i) != load(expected + i)) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+fn string_member(
+    JsonDocument& document,
+    i64 root,
+    usize key,
+    i64 key_length,
+    String&mut scratch,
+    BytesView&mut output,
+    bool required
+) -> bool {
+    i64 node = std::encoding::json::document::object_get(document, root, key, key_length, scratch);
+
+    if (node < 0) {
+        *output = BytesView {
+            data: 0,
+            length: 0
+        };
+        return !required;
+    }
+
+    JsonValueKind kind;
+
+    if (!std::encoding::json::document::kind_at(document, node, &mut kind) || kind != JsonValueKind::String) {
+        return false;
+    }
+    *output = std::encoding::json::document::value_view(document, node);
+    return true;
+}
+
+/// Parses a symmetric (`kty: oct`) JWK and decodes `k` into caller storage.
+public fn parse_octet(
+    usize source,
+    i64 length,
+    usize key_output,
+    i64 key_capacity,
+    OctetJwk&mut output
+) -> JwtError {
+    JsonDocument document = std::encoding::json::document::empty();
+
+    if (std::encoding::json::document::parse_borrowed(source, length, 32, &mut document) != JsonError::None) {
+        return JwtError::InvalidJwk;
+    }
+
+    i64 root = std::encoding::json::document::root_index(&document);
+    JsonValueKind kind;
+
+    if (
+        !std::encoding::json::document::kind_at(&document, root, &mut kind) ||
+        kind != JsonValueKind::Object
+    ) {
+        return JwtError::InvalidJwk;
+    }
+
+    u8 kty_key[3] = [107, 116, 121];
+    u8 key_key[1] = [107];
+    u8 kid_key[3] = [107, 105, 100];
+    u8 alg_key[3] = [97, 108, 103];
+    u8 oct_value[3] = [111, 99, 116];
+    String scratch = alloc::string::with_capacity(32);
+    BytesView kty;
+    BytesView encoded;
+    BytesView key_id;
+    BytesView algorithm;
+
+    if (
+        !string_member(&document, root, (&kty_key[0])as usize, 3, &mut scratch, &mut kty, true) ||
+        !equal(kty, (&oct_value[0])as usize, 3)
+    ) {
+        return JwtError::InvalidJwk;
+    }
+    if (!string_member(&document, root, (&key_key[0])as usize, 1, &mut scratch, &mut encoded, true)) {
+        return JwtError::InvalidJwk;
+    }
+    if (
+        !string_member(&document, root, (&kid_key[0])as usize, 3, &mut scratch, &mut key_id, false) ||
+        !string_member(&document, root, (&alg_key[0])as usize, 3, &mut scratch, &mut algorithm, false)
+    ) {
+        return JwtError::InvalidJwk;
+    }
+
+    i64 key_length = 0;
+
+    Base64UrlError decoded = encoding::base64url::decode(
+        encoded.data,
+        encoded.length,
+        key_output,
+        key_capacity,
+        &mut key_length
+    );
+    if (decoded == Base64UrlError::OutputFull) {
+        return JwtError::OutputFull;
+    }
+    if (decoded != Base64UrlError::None || key_length <= 0) {
+        return JwtError::InvalidJwk;
+    }
+    *output = OctetJwk {
+        key_id: key_id,
+        algorithm: algorithm,
+        key: key_output,
+        key_length: key_length
+    };
+    return JwtError::None;
+}

@@ -1,0 +1,14 @@
+{
+  "archive": "packages/jwt/0.1.0.dpk",
+  "checksum": "6c5d154c4bb6ef5c",
+  "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/jwt/0.1.0.dpk",
+  "metadata": {
+    "description": "JWT, JWS, registered-claim, and JWK support for Raz."
+  },
+  "name": "jwt",
+  "owners": [
+    "raz-language"
+  ],
+  "version": "0.1.0",
+  "yanked": false
+}

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace http_router::router;
+
+import core::bytes;
 import core::result;
 
 public enum Method {
@@ -487,6 +489,7 @@ fn method_score(Method route_method, Method request_method) -> i64 {
     if (route_method == request_method) {
         return 2;
     }
+
     // HEAD may use a GET route when no more-specific HEAD route wins.
     if (request_method == Method::Head && route_method == Method::Get) {
         return 1;

@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace crypto::curve::ed25519;
+
 public const i64 PRIVATE_KEY_SIZE = 32;
 public const i64 PUBLIC_KEY_SIZE = 32;
 public const i64 SIGNATURE_SIZE = 64;
+
 // Ed25519 is exposed through Raz's permanent platform cryptography boundary.
 // The same ABI is used by the Raz package-signing implementation.
 extern fn raz_rt_ed25519_keygen(

@@ -1,0 +1,195 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace encoding::base64url;
+
+public enum Base64UrlError {
+    None,
+    InvalidLength,
+    InvalidByte,
+    InvalidPadding,
+    OutputFull,
+}
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn store(usize address, i64 value) {
+    unsafe {
+        *((address)as u8*mut) = value as u8;
+    }
+}
+
+fn alphabet(i64 value) -> i64 {
+    if (value < 26) {
+        return 65 + value;
+    }
+    if (value < 52) {
+        return 97 + value - 26;
+    }
+    if (value < 62) {
+        return 48 + value - 52;
+    }
+    if (value == 62) {
+        return 45;
+    }
+    return 95;
+}
+
+fn value(i64 byte) -> i64 {
+    if (byte >= 65 && byte <= 90) {
+        return byte - 65;
+    }
+    if (byte >= 97 && byte <= 122) {
+        return byte - 97 + 26;
+    }
+    if (byte >= 48 && byte <= 57) {
+        return byte - 48 + 52;
+    }
+    if (byte == 45) {
+        return 62;
+    }
+    if (byte == 95) {
+        return 63;
+    }
+    return -1;
+}
+
+/// Returns the canonical unpadded RFC 4648 base64url length.
+public fn encoded_length(i64 length) -> i64 {
+    if (length < 0 || length > 6917529027641081853) {
+        return -1;
+    }
+
+    i64 full = (length / 3) * 4;
+    i64 tail = length % 3;
+
+    if (tail == 1) {
+        return full + 2;
+    }
+    if (tail == 2) {
+        return full + 3;
+    }
+    return full;
+}
+
+public fn decoded_length(i64 length) -> i64 {
+    if (length < 0 || (length & 3) == 1) {
+        return -1;
+    }
+    return (length / 4) * 3 + ((length & 3) * 6) / 8;
+}
+
+public fn encode(usize input, i64 length, usize output, i64 capacity, i64&mut written, ) -> Base64UrlError {
+    *written = 0;
+
+    i64 required = encoded_length(length);
+
+    if (required < 0 || (length > 0 && input == 0)) {
+        return Base64UrlError::InvalidLength;
+    }
+    if (capacity < required || (required > 0 && output == 0)) {
+        return Base64UrlError::OutputFull;
+    }
+
+    i64 source = 0;
+    i64 destination = 0;
+
+    while (source + 3 <= length) {
+        i64 a = load(input + source);
+        i64 b = load(input + source + 1);
+        i64 c = load(input + source + 2);
+
+        store(output + destination, alphabet(a >> 2));
+        store(output + destination + 1, alphabet(((a & 3) << 4) | (b >> 4)));
+        store(output + destination + 2, alphabet(((b & 15) << 2) | (c >> 6)));
+        store(output + destination + 3, alphabet(c & 63));
+        source += 3;
+        destination += 4;
+    }
+    if (source < length) {
+        i64 a = load(input + source);
+
+        store(output + destination, alphabet(a >> 2));
+        destination += 1;
+        if (source + 1 < length) {
+            i64 b = load(input + source + 1);
+
+            store(output + destination, alphabet(((a & 3) << 4) | (b >> 4)));
+            store(output + destination + 1, alphabet((b & 15) << 2));
+            destination += 2;
+        } else {
+            store(output + destination, alphabet((a & 3) << 4));
+            destination += 1;
+        }
+    }
+    *written = destination;
+    return Base64UrlError::None;
+}
+
+public fn decode(usize input, i64 length, usize output, i64 capacity, i64&mut written, ) -> Base64UrlError {
+    *written = 0;
+
+    i64 required = decoded_length(length);
+
+    if (required < 0 || (length > 0 && input == 0)) {
+        return Base64UrlError::InvalidLength;
+    }
+    if (capacity < required || (required > 0 && output == 0)) {
+        return Base64UrlError::OutputFull;
+    }
+
+    i64 source = 0;
+    i64 destination = 0;
+
+    while (source + 4 <= length) {
+        i64 a = value(load(input + source));
+        i64 b = value(load(input + source + 1));
+        i64 c = value(load(input + source + 2));
+        i64 d = value(load(input + source + 3));
+
+        if (a < 0 || b < 0 || c < 0 || d < 0) {
+            return Base64UrlError::InvalidByte;
+        }
+        store(output + destination, (a << 2) | (b >> 4));
+        store(output + destination + 1, ((b & 15) << 4) | (c >> 2));
+        store(output + destination + 2, ((c & 3) << 6) | d);
+        source += 4;
+        destination += 3;
+    }
+
+    i64 tail = length - source;
+
+    if (tail == 2) {
+        i64 a = value(load(input + source));
+        i64 b = value(load(input + source + 1));
+
+        if (a < 0 || b < 0) {
+            return Base64UrlError::InvalidByte;
+        }
+        if ((b & 15) != 0) {
+            return Base64UrlError::InvalidPadding;
+        }
+        store(output + destination, (a << 2) | (b >> 4));
+        destination += 1;
+    } else if (tail == 3) {
+        i64 a = value(load(input + source));
+        i64 b = value(load(input + source + 1));
+        i64 c = value(load(input + source + 2));
+
+        if (a < 0 || b < 0 || c < 0) {
+            return Base64UrlError::InvalidByte;
+        }
+        if ((c & 3) != 0) {
+            return Base64UrlError::InvalidPadding;
+        }
+        store(output + destination, (a << 2) | (b >> 4));
+        store(output + destination + 1, ((b & 15) << 4) | (c >> 2));
+        destination += 2;
+    }
+    *written = destination;
+    return Base64UrlError::None;
+}

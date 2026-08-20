@@ -1,0 +1,79 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+import cbor::error;
+import cbor::reader;
+import cbor::value;
+import cbor::writer;
+
+fn load(usize address) -> i64 {
+    unsafe {
+        return (*((address)as u8*const))as i64;
+    }
+}
+
+fn main() -> i64 {
+    u8 output[64];
+    u8 text[2] = [104, 105];
+    CborWriter writer = cbor::writer::create(&mut output[0]as usize, 64);
+
+    if (cbor::writer::array(&mut writer, 3) != CborError::None) {
+        return 1;
+    }
+    if (cbor::writer::unsigned(&mut writer, 42) != CborError::None) {
+        return 2;
+    }
+    if (cbor::writer::negative(&mut writer, -7) != CborError::None) {
+        return 3;
+    }
+    if (cbor::writer::text(&mut writer, &text[0]as usize, 2) != CborError::None) {
+        return 4;
+    }
+    if (
+        cbor::writer::written(&writer) != 7 ||
+        load(&output[0]as usize) != 131 ||
+        load(&output[1]as usize) != 24 ||
+        load(&output[2]as usize) != 42 ||
+        load(&output[3]as usize) != 38 ||
+        load(&output[4]as usize) != 98
+    ) {
+        return 5;
+    }
+
+    CborReader reader = cbor::reader::create(&output[0]as usize, cbor::writer::written(&writer));
+    CborItem item;
+    i64 integer = 0;
+
+    if (
+        cbor::reader::next(&mut reader, &mut item) != CborError::None ||
+        item.kind != CborKind::Array ||
+        item.argument != 3
+    ) {
+        return 6;
+    }
+    if (
+        cbor::reader::next(&mut reader, &mut item) != CborError::None ||
+        cbor::reader::integer(&item, &mut integer) != CborError::None ||
+        integer != 42
+    ) {
+        return 7;
+    }
+    if (
+        cbor::reader::next(&mut reader, &mut item) != CborError::None ||
+        cbor::reader::integer(&item, &mut integer) != CborError::None ||
+        integer != -7
+    ) {
+        return 8;
+    }
+    if (
+        cbor::reader::next(&mut reader, &mut item) != CborError::None ||
+        item.kind != CborKind::Text ||
+        item.payload.length != 2
+    ) {
+        return 9;
+    }
+    if (cbor::reader::next(&mut reader, &mut item) != CborError::End) {
+        return 10;
+    }
+    return 0;
+}

@@ -1,0 +1,232 @@
+// Copyright 2026 Mario Vinciguerra
+// SPDX-License-Identifier: Apache-2.0
+
+namespace json::writer;
+
+import alloc::string;
+import core::bytes;
+import std::encoding::json;
+
+public enum WriterError {
+    None,
+    InvalidState,
+    DepthExceeded,
+    OutOfMemory,
+}
+
+public struct JsonWriter {
+    String output;
+    u8 kinds[64];
+    i64 counts[64];
+    bool awaiting_value[64];
+    i64 depth;
+    bool root_written;
+    WriterError error;
+}
+
+public fn create(i64 capacity) -> JsonWriter {
+    JsonWriter writer;
+
+    writer.output = alloc::string::with_capacity(capacity);
+    writer.depth = 0;
+    writer.root_written = false;
+    writer.error = WriterError::None;
+    return move writer;
+}
+
+fn fail(JsonWriter&mut writer, WriterError error) -> bool {
+    if (writer.error == WriterError::None) {
+        writer.error = error;
+    }
+    return false;
+}
+
+fn append_byte(JsonWriter&mut writer, i64 byte) -> bool {
+    if (!alloc::string::push_byte(&mut writer.output, byte)) {
+        return fail(writer, WriterError::OutOfMemory);
+    }
+    return true;
+}
+
+fn before_value(JsonWriter&mut writer) -> bool {
+    if (writer.error != WriterError::None) {
+        return false;
+    }
+    if (writer.depth == 0) {
+        if (writer.root_written) {
+            return fail(writer, WriterError::InvalidState);
+        }
+        writer.root_written = true;
+        return true;
+    }
+
+    i64 level = writer.depth - 1;
+
+    if (writer.kinds[level] == 1) {
+        if (writer.counts[level] > 0 && !append_byte(writer, 44)) {
+            return false;
+        }
+        writer.counts[level] += 1;
+        return true;
+    }
+    if (!writer.awaiting_value[level]) {
+        return fail(writer, WriterError::InvalidState);
+    }
+    writer.awaiting_value[level] = false;
+    writer.counts[level] += 1;
+    return true;
+}
+
+public fn begin_array(JsonWriter&mut writer) -> bool {
+    if (!before_value(writer)) {
+        return false;
+    }
+    if (writer.depth >= 64) {
+        return fail(writer, WriterError::DepthExceeded);
+    }
+    if (!append_byte(writer, 91)) {
+        return false;
+    }
+    writer.kinds[writer.depth] = 1;
+    writer.counts[writer.depth] = 0;
+    writer.awaiting_value[writer.depth] = false;
+    writer.depth += 1;
+    return true;
+}
+
+public fn begin_object(JsonWriter&mut writer) -> bool {
+    if (!before_value(writer)) {
+        return false;
+    }
+    if (writer.depth >= 64) {
+        return fail(writer, WriterError::DepthExceeded);
+    }
+    if (!append_byte(writer, 123)) {
+        return false;
+    }
+    writer.kinds[writer.depth] = 2;
+    writer.counts[writer.depth] = 0;
+    writer.awaiting_value[writer.depth] = false;
+    writer.depth += 1;
+    return true;
+}
+
+public fn key(JsonWriter&mut writer, usize data, i64 length) -> bool {
+    if (writer.error != WriterError::None || writer.depth <= 0) {
+        return fail(writer, WriterError::InvalidState);
+    }
+
+    i64 level = writer.depth - 1;
+
+    if (writer.kinds[level] != 2 || writer.awaiting_value[level]) {
+        return fail(writer, WriterError::InvalidState);
+    }
+    if (writer.counts[level] > 0 && !append_byte(writer, 44)) {
+        return false;
+    }
+    if (
+        !std::encoding::json::append_escaped_string(&mut writer.output, data, length) ||
+        !append_byte(writer, 58)
+    ) {
+        return fail(writer, WriterError::OutOfMemory);
+    }
+    writer.awaiting_value[level] = true;
+    return true;
+}
+
+public fn string(JsonWriter&mut writer, usize data, i64 length) -> bool {
+    if (!before_value(writer)) {
+        return false;
+    }
+    if (!std::encoding::json::append_escaped_string(&mut writer.output, data, length)) {
+        return fail(writer, WriterError::OutOfMemory);
+    }
+    return true;
+}
+
+public fn signed(JsonWriter&mut writer, i64 value) -> bool {
+    if (!before_value(writer)) {
+        return false;
+    }
+    if (!std::encoding::json::append_i64(&mut writer.output, value)) {
+        return fail(writer, WriterError::OutOfMemory);
+    }
+    return true;
+}
+
+public fn unsigned(JsonWriter&mut writer, u64 value) -> bool {
+    if (!before_value(writer)) {
+        return false;
+    }
+    if (!std::encoding::json::append_u64(&mut writer.output, value)) {
+        return fail(writer, WriterError::OutOfMemory);
+    }
+    return true;
+}
+
+public fn boolean(JsonWriter&mut writer, bool value) -> bool {
+    if (!before_value(writer)) {
+        return false;
+    }
+    if (!std::encoding::json::append_bool(&mut writer.output, value)) {
+        return fail(writer, WriterError::OutOfMemory);
+    }
+    return true;
+}
+
+public fn null_value(JsonWriter&mut writer) -> bool {
+    if (!before_value(writer)) {
+        return false;
+    }
+    if (!std::encoding::json::append_null(&mut writer.output)) {
+        return fail(writer, WriterError::OutOfMemory);
+    }
+    return true;
+}
+
+public fn end(JsonWriter&mut writer) -> bool {
+    if (writer.error != WriterError::None || writer.depth <= 0) {
+        return fail(writer, WriterError::InvalidState);
+    }
+
+    i64 level = writer.depth - 1;
+
+    if (writer.kinds[level] == 2 && writer.awaiting_value[level]) {
+        return fail(writer, WriterError::InvalidState);
+    }
+
+    i64 close = 93;
+
+    if (writer.kinds[level] == 2) {
+        close = 125;
+    }
+    if (!append_byte(writer, close)) {
+        return false;
+    }
+    writer.depth -= 1;
+    return true;
+}
+
+public fn complete(JsonWriter& writer) -> bool {
+    return writer.error == WriterError::None && writer.root_written && writer.depth == 0;
+}
+
+public fn error(JsonWriter& writer) -> WriterError {
+    return writer.error;
+}
+
+public fn view(JsonWriter& writer) -> BytesView {
+    return BytesView {
+        data: alloc::string::data_ptr(&writer.output),
+        length: alloc::string::len(&writer.output),
+    };
+}
+
+public fn take(JsonWriter&mut writer) -> String {
+    String output = alloc::string::clone_string(&writer.output);
+
+    alloc::string::clear(&mut writer.output);
+    writer.root_written = false;
+    writer.depth = 0;
+    return move output;
+}

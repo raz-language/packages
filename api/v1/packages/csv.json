@@ -1,0 +1,22 @@
+{
+  "name": "csv",
+  "owners": [
+    "raz-language"
+  ],
+  "versions": [
+    {
+      "archive": "packages/csv/0.1.0.dpk",
+      "checksum": "2e66143645449ae2",
+      "download": "https://raw.githubusercontent.com/raz-language/packages/main/packages/csv/0.1.0.dpk",
+      "metadata": {
+        "description": "A streaming, zero-copy CSV reader and allocation-free writer for Raz."
+      },
+      "name": "csv",
+      "owners": [
+        "raz-language"
+      ],
+      "version": "0.1.0",
+      "yanked": false
+    }
+  ]
+}

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 namespace postgres::pool;
+
 import core::result;
 import postgres::client;
+import postgres::client as client;
 
 public enum PoolError {
     InvalidStorage,
@@ -13,7 +15,7 @@ public enum PoolError {
 }
 
 public struct Slot {
-    client::Client connection;
+    postgres::client::Client connection;
     bool occupied;
     bool leased;
     u64 generation;
@@ -41,11 +43,13 @@ public fn init(usize slots, i64 capacity) -> Pool {
 }
 
 fn slot_at(Pool& pool, i64 index) -> Slot*mut {
-    return (pool.slots + index * (size_of<Slot>()as i64))as Slot*mut;
+    unsafe {
+        return (pool.slots + index * (size_of<Slot>()as i64))as Slot*mut;
+    }
 }
 
 /// Adds an already-created connection to caller-owned pool storage.
-public fn add(Pool&mut pool, client::Client connection) -> Result<i64, PoolError> {
+public fn add(Pool&mut pool, postgres::client::Client connection) -> Result<i64, PoolError> {
     if (pool.slots == 0 || pool.capacity <= 0) {
         return Result<i64, PoolError>::Error(PoolError::InvalidStorage);
     }
@@ -82,7 +86,7 @@ public fn acquire(Pool&mut pool) -> Result<Lease, PoolError> {
         auto slot = slot_at(pool, index);
 
         unsafe {
-            if ((*slot).occupied && !(*slot).leased && (*slot).connection.state == client::State::Ready) {
+            if ((*slot).occupied && !(*slot).leased && (*slot).connection.state == State::Ready) {
                 (*slot).leased = true;
                 pool.next_probe = (index + 1) % pool.capacity;
                 return Result<Lease, PoolError>::Ok(Lease {
